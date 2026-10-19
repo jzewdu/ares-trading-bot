@@ -17,9 +17,9 @@ env/
 # runtime output
 *.log
 logs/
-data/
 *.sqlite
-*.db
+*.sqlite3
+data/
 models/*.pkl
 models/*.joblib
 

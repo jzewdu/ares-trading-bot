@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>Ares · Paper Crypto</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <div><p class="eyebrow">ALPACA · PAPER ACCOUNT</p><h1>Ares</h1><p class="sub">Crypto momentum monitor</p></div>
+      <span class="pill {{ 'paused' if state.paused else 'active' }}">{{ 'PAUSED' if state.paused else 'PAPER ACTIVE' }}</span>
+    </header>
+    <section class="notice"><strong>Paper mode only.</strong> Signals can lose money in live markets. The 4% protective exit is checked by polling and may fill later or at a worse price; this dashboard cannot switch to live trading.</section>
+    <section class="grid">
+      <article class="card"><label>Engine status</label><strong>{{ state.status }}</strong><small>Last scan: {{ state.last_cycle or 'not yet' }}</small></article>
+      <article class="card"><label>Market universe</label><strong>{{ state.scanned }} pairs scanned</strong><small>Active Alpaca USD and USDC pairs</small></article>
+      <article class="card"><label>Risk limits</label><strong>3% per position · 15% total</strong><small>3% daily loss pause · 5 position cap</small></article>
+    </section>
+    {% if state.last_error %}<section class="error">{{ state.last_error }}</section>{% endif %}
+    <section class="controls">
+      <button class="stop" type="button" onclick="control('/control/pause')">Pause new entries</button>
+      <button class="go" type="button" onclick="control('/control/resume')">Resume paper trading</button>
+      <span>Pausing stops new entries; existing protective exits keep running. Resume only after checking the account and latest activity.</span>
+    </section>
+    <section class="panel"><div class="section-head"><h2>Recent paper orders</h2><span>{{ trades|length }} shown</span></div>
+      {% if trades %}<div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Pair</th><th>Side</th><th>Size</th><th>Reason</th></tr></thead><tbody>
+      {% for trade in trades %}<tr><td>{{ trade.ts[:19].replace('T',' ') }}</td><td>{{ trade.symbol }}</td><td><span class="tag {{ trade.side }}">{{ trade.side }}</span></td><td>{{ ('$%.2f'|format(trade.notional)) if trade.notional else trade.qty }}</td><td>{{ trade.reason }}</td></tr>{% endfor %}
+      </tbody></table></div>{% else %}<p class="empty">No orders recorded.</p>{% endif %}
+    </section>
+    <section class="panel"><div class="section-head"><h2>Activity</h2><span>{{ events|length }} shown</span></div>
+      {% if events %}<ul class="events">{% for item in events %}<li><time>{{ item.ts[:19].replace('T',' ') }}</time><b>{{ item.level }}</b><span>{{ item.message }}</span></li>{% endfor %}</ul>{% else %}<p class="empty">Waiting for activity.</p>{% endif %}
+    </section>
+    <footer>Use on a trusted home network only. HTTPS is required for network access. Never expose this dashboard to the public internet.</footer>
+  </main>
+  <script>
+    async function control(path) {
+      const response = await fetch(path, {method: 'POST', headers: {'X-Ares-Action': 'dashboard'}});
+      if (!response.ok) alert('Action failed: ' + (await response.text()));
+      else location.reload();
+    }
+  </script>
+</body>
+</html>
