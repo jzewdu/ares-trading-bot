@@ -1,0 +1,29 @@
+# secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.python-version
+
+# runtime output
+*.log
+logs/
+data/
+*.sqlite
+*.db
+models/*.pkl
+models/*.joblib
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
