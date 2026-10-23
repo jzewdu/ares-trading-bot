@@ -5,8 +5,8 @@ executes orders through the Alpaca API. It reads RSI, MACD and SMA, turns them
 into a signal, sizes each trade against a fixed risk budget, and stops for the
 day if it loses too much.
 
-**Status:** v1 built 2026-10-09. Paper trading only. Runs on PythonAnywhere
-today; moving to a Raspberry Pi.
+**Status:** v1 built 2026-10-09. Paper trading only. Runs on a Raspberry Pi 3
+Model A+ at home; PythonAnywhere before that.
 
 > Educational project, not financial advice.
 
@@ -29,8 +29,8 @@ Full detail, including the risk math: [docs/how-it-works.md](docs/how-it-works.m
 
 | Phase | Host | Notes |
 | --- | --- | --- |
-| Now | PythonAnywhere | always-on process against the Alpaca **paper** endpoint |
-| Next | Raspberry Pi | same code, long-running service, `.env` for keys |
+| Now | Raspberry Pi 3 Model A+ | always-on systemd service, 512 MB RAM, Wi-Fi, `.env` for keys |
+| Before | PythonAnywhere | always-on task against the Alpaca **paper** endpoint; now the fallback |
 
 Setup for both hosts: [docs/running.md](docs/running.md).
 
@@ -75,6 +75,9 @@ anything on either side. Auth setup and the manual fallback are in
 
 - **2026-10-09 — v1:** built with Claude Code running through Ollama.
 - **Later:** Codex reviewed and refactored the loop.
+- **2026-10-23 — repo:** organized by Codebuff into this docs structure, with
+  the Pi publish script. Documentation and tooling only; no trading logic
+touched.
 
 Narrative and the actual prompt/test loop: [docs/build-loop.md](docs/build-loop.md).
 
