@@ -45,7 +45,7 @@ die() { printf '\nerror: %s\n' "$*" >&2; exit 1; }
 # so the repo's README and docs are not overwritten.
 EXCLUDES=(
   .git .env .env.* .venv venv env node_modules __pycache__
-  '*.py[cod]' '*.log' '*.pem' '*.key' '*.sqlite' '*.db'
+  '*.py[cod]' '*.log' '*.pem' '*.key' '*.sqlite' '*.sqlite3' '*.db'
   logs data models .pytest_cache .DS_Store
   README.md docs scripts .gitignore .env.example
 )

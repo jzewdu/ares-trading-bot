@@ -1,167 +1,144 @@
 # Running ARES
 
-ARES is a long-lived Python process with one job: stay up and run the 60-second
-loop. It currently runs on a **Raspberry Pi 3 Model A+** at home, having moved
-there from PythonAnywhere.
-
-Everything below keeps the process alive, keeps the keys out of git, and keeps
-it pointed at the paper endpoint.
+ARES is one Python process plus gunicorn, serving a localhost dashboard, on a
+**Raspberry Pi 3 Model A+**. It is paper-trading only.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill it in. Never commit `.env`.
+Copy the template and fill it in. `chmod 600 .env` — it holds broker keys.
 
-| Variable | Purpose |
+```bash
+cp .env.example .env
+chmod 600 .env
+```
+
+| Variable | Meaning |
 | --- | --- |
-| `ALPACA_API_KEY` | Alpaca key id |
-| `ALPACA_SECRET_KEY` | Alpaca secret |
-| `ALPACA_BASE_URL` | `https://paper-api.alpaca.markets` for paper trading |
+| `ALPACA_API_KEY` | paper account key id |
+| `ALPACA_API_SECRET` | paper account secret |
+| `ALPACA_PAPER` | must stay `true`; the client refuses otherwise |
+| `ARES_UI_USER` / `ARES_UI_PASSWORD` | dashboard login; unset means the dashboard returns 503 |
+| `ARES_BIND` | bind address, default `127.0.0.1` |
+| `ARES_TLS_CERT` / `ARES_TLS_KEY` | set both to bind beyond localhost over HTTPS |
+| `ARES_STATE_PATH` | SQLite file, default `ares_state.sqlite3` |
+| `MAX_PAIRS`, `MAX_POSITIONS`, `MAX_POSITION_PCT`, `MAX_TOTAL_EXPOSURE_PCT`, `MAX_DAILY_LOSS_PCT`, `POLL_SECONDS` | risk and cadence caps |
 
-Variable names in `.env.example` are the target convention — if the bot source
-on the Pi uses different names, rename them there rather than in two places.
+**The Python code does not read `.env` itself.** `config.py` calls
+`os.getenv()` at import, so under systemd the variables arrive via
+`EnvironmentFile=`, and for a manual run you must export them first:
 
-## The host: Raspberry Pi 3 Model A+
+```bash
+set -a; source .env; set +a
+```
 
-| Spec | Value | Why it matters here |
-| --- | --- | --- |
-| CPU | 1.4 GHz quad-core Cortex-A53 (BCM2837B0, 64-bit capable) | plenty for one loop every 60s |
-| RAM | **512 MB** | the real constraint — see below |
-| Network | dual-band 2.4/5 GHz Wi-Fi, **no Ethernet** | whole bot depends on Wi-Fi staying up |
-| USB | **one** USB 2.0 port | keyboard or SSD, not both |
-| Power | micro-USB, 5 V / 2.5 A | a weak supply is the #1 cause of mystery reboots |
-| Clock | **no RTC** | time is wrong after every power cut until NTP syncs |
-| Storage | microSD | finite write endurance |
+Forgetting this is the usual cause of "Setup required" on the dashboard — the
+process simply saw no keys.
 
-### What that means in practice
-
-- **512 MB of RAM.** Raspberry Pi OS Lite idles around 100 MB, which leaves
-  ~400 MB for Python plus pandas/sklearn. That fits, but only if the Pi does
-  nothing else: no desktop, no Jupyter, no second bot. Swap covers the peaks:
-
-  ```bash
-  sudo dphys-swapfile setup && sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
-  sudo dphys-swapfile swapon
-  sudo apt install zram-tools    # compressed swap: kinder to the SD card
-  ```
-
-  If the OOM killer ever takes the process, `journalctl -k | grep -i oom` shows
-  it — that is a memory problem, not a strategy problem.
-- **Wi-Fi only, no Ethernet.** A dropped access point looks exactly like a
-  quiet market. `Restart=always` handles the crash case, not a hung socket, so
-  prefer 5 GHz if the router is close, and check `journalctl -u ares` for
-  repeated connection errors before blaming the model.
-- **No real-time clock.** After a power cut the clock can be hours off until
-  NTP syncs, and anything that reasons about market hours will then reason
-  about the wrong ones. Wait for a synced clock before trading:
-
-  ```bash
-  timedatectl show -p NTPSynchronized --value   # must be "yes"
-  ```
-- **microSD wear.** Logs and any SQLite file are write-heavy. Keep logs in the
-  journal and cap it (below) rather than appending to a file on the card
-  forever, and keep a copy of `.env` somewhere that is not the card.
-- **Power.** Run `vcgencmd get_throttled` after any unexpected reboot; `0x0` is
-  clean, anything else means undervoltage and the fix is a better supply, not
-  more code.
-
-## Phase 1 — Raspberry Pi 3 Model A+ (current)
+## Install on the Pi
 
 ```bash
 sudo apt update && sudo apt install -y git python3-venv
-git clone https://github.com/jzewdu/ares-trading-bot.git ~/ares-trading-bot
-cd ~/ares-trading-bot
+git clone https://github.com/jzewdu/ares-trading-bot.git ~/ares_trading_bot
+cd ~/ares_trading_bot
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt      # once requirements.txt exists
-cp .env.example .env                 # then edit .env
+pip install -r requirements.txt
+cp .env.example .env && chmod 600 .env    # then edit .env
 ```
 
-Run it as a systemd service so a reboot brings it back:
+The unit in this repo expects `/home/jzewdu/ares_trading_bot` and
+`User=jzewdu`. Adjust those paths if the Pi's layout changed.
 
-```ini
-# /etc/systemd/system/ares.service
-[Unit]
-Description=ARES trading loop
-After=network-online.target time-sync.target
-Wants=network-online.target
-
-[Service]
-User=pi
-WorkingDirectory=/home/pi/ares-trading-bot
-EnvironmentFile=/home/pi/ares-trading-bot/.env
-ExecStart=/home/pi/ares-trading-bot/.venv/bin/python bot.py
-Restart=always
-RestartSec=30
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
+## Run it under systemd
 
 ```bash
+sudo cp ares-bot.service /etc/systemd/system/ares.service
+sudo mkdir -p /var/lib/ares && sudo chown jzewdu:jzewdu /var/lib/ares
 sudo systemctl daemon-reload
 sudo systemctl enable --now ares
-journalctl -u ares -f          # follow the loop's output
+journalctl -u ares -f
 ```
 
-`Restart=always` is the point of the service: if the loop raises, it comes back
-30s later instead of staying dead until you notice. Cap the journal so the card
-does not fill up:
+The unit exists for one reason: `Restart=on-failure` with `RestartSec=10`
+brings the service back after a crash. It also sandboxes the process
+(`ProtectSystem=full`, `ProtectHome=read-only`, `NoNewPrivileges`), with
+`/var/lib/ares` the only writable path — which is why the state database lives
+there and not next to the code.
+
+Note that restarting the *process* does not resume *trading*: `paused` lives in
+SQLite and starts as `1`. After any restart, open the dashboard and press
+**Resume paper trading** once you have checked the account.
+
+## Reach the dashboard
+
+It binds `127.0.0.1:8080` and speaks HTTP, so it is only reachable from the Pi.
+Use an SSH tunnel from your laptop:
 
 ```bash
-sudo sed -i 's/^#\?SystemMaxUse=.*/SystemMaxUse=100M/' /etc/systemd/journald.conf
-sudo systemctl restart systemd-journald
+ssh -N -L 127.0.0.1:8080:127.0.0.1:8080 jzewdu@Pi3-Earth.local
 ```
 
-Python: use Raspberry Pi OS **Lite**. The 3 A+ is 64-bit capable, but at 512 MB
-the 32-bit Lite image leaves noticeably more headroom — extra RAM beats extra
-address space for a workload this small.
+On Windows, `scripts/Open Ares Dashboard.cmd` does exactly this — it opens the
+tunnel, waits for the port to answer, then launches
+`http://127.0.0.1:8080/`. Keep the SSH window open while you use the dashboard.
 
-## Phase 2 — PythonAnywhere (earlier host, now fallback)
+Do not port-forward 8080 or bind it to the network without TLS. The TLS path
+exists (`ARES_TLS_CERT` + `ARES_TLS_KEY`), but the tunnel costs nothing and
+exposes nothing.
 
-1. Upload the bot files (or `git clone` the repo).
-2. Create the virtualenv and install the bot's requirements.
-3. Set the three variables above in the **Web** or **Task** environment, or in
-   a `.env` the process reads — not in the source.
-4. Run it as an **Always-on task**: `python3 bot.py >> /tmp/ares.log 2>&1`
-5. Confirm paper mode by checking that orders appear on the Alpaca paper
-   dashboard, never the live one.
+## The Pi 3 Model A+ as a host
 
-PythonAnywhere recycles always-on tasks. If the loop dies silently there, check
-`/tmp/ares.log` before assuming a strategy bug. It remains useful as a
-fallback host if the Pi is offline.
+| Spec | Value | What it means here |
+| --- | --- | --- |
+| CPU | 1.4 GHz quad-core Cortex-A53 | one scan every 300 s is cheap |
+| RAM | 512 MB | fine for Flask + gunicorn + requests; the reason there is no pandas/sklearn |
+| Network | Wi-Fi only, no Ethernet | the loop depends on Wi-Fi; API errors pause it |
+| USB | one port | keyboard or storage, not both |
+| Clock | no RTC | time is wrong after a power cut until NTP syncs |
+| Storage | microSD | avoid chatty logs; the state database is small |
 
-## Publishing code from the Pi
+- **Memory.** `ProtectSystem` and a 1-worker gunicorn keep it modest. If the
+  service disappears with no log line, check for the OOM killer:
+  `journalctl -k | grep -i oom`. A strategy change that adds heavy analytics
+  will not fit.
+- **Clock.** The daily-loss baseline resets on the **UTC** date, and bar
+  timestamps come from the broker. After a power cut, wait for
+  `timedatectl show -p NTPSynchronized --value` to say `yes` before resuming,
+  or the 3% daily window starts at the wrong moment.
+- **Power.** `vcgencmd get_throttled` returning anything but `0x0` after an
+  unexpected reboot means undervoltage — fix the supply, not the code.
+- **Journal size.** If the card fills up, cap it:
+  `SystemMaxUse=100M` in `/etc/systemd/journald.conf`, then restart
+  `systemd-journald`.
 
-The bot source lives on the Pi; the repo lives on GitHub. `publish-from-pi.sh`
-bridges them without hand-copying files.
+## Credentials
 
-**One-time auth** (needs write access to the repo) — pick one:
+The 2026-10-18 rollout plan records that an Alpaca key pair and the Pi password
+were pasted into a chat and should be treated as compromised. Before this bot
+trades anything:
 
-- **SSH (recommended):**
-  ```bash
-  ssh-keygen -t ed25519 -C "ares-pi"      # accept defaults
-  cat ~/.ssh/id_ed25519.pub               # add at github.com/settings/keys
-  export REPO_URL=git@github.com:jzewdu/ares-trading-bot.git
-  ```
-- **gh CLI:** `gh auth login` on the Pi, then keep the default HTTPS URL.
+1. Rotate the Alpaca **paper** keys and put the new ones in `.env`.
+2. Change the Pi's password locally, or install an SSH key and disable password
+   login.
+3. Keep the dashboard credentials long and unique — they are all that stands
+   between the network and the pause/resume buttons.
 
-**Every time you want to publish:**
+## Updating the code
+
+The repository is the canonical copy of the source. Edit and push from the
+machine you develop on, then on the Pi:
 
 ```bash
-cd ~/ares                 # the folder with your .py files
-~/publish-from-pi.sh      # add --dry-run to preview first
+cd ~/ares_trading_bot
+git pull
+sudo systemctl restart ares
 ```
 
-What it does: clones or fast-forwards `~/ares-trading-bot`, copies your bot
-files in, refuses to stage anything that looks like a secret, commits, pushes.
-It never deletes files in either folder.
-
-**Manual fallback,** if you would rather do it by hand:
+If you edited the running copy on the Pi instead, `scripts/publish-from-pi.sh`
+copies those edits back into the repo, commits and pushes them, refusing to
+stage secrets or a SQLite state file:
 
 ```bash
-git clone https://github.com/jzewdu/ares-trading-bot.git ~/ares-trading-bot
-cp ~/ares/*.py ~/ares-trading-bot/
-cd ~/ares-trading-bot && git add -A && git commit -m "Add bot source"
-git push
+cd ~/ares_trading_bot
+scripts/publish-from-pi.sh --dry-run
+scripts/publish-from-pi.sh
 ```

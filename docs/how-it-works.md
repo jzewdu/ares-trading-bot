@@ -1,66 +1,138 @@
 # How ARES works
 
-## The loop
+Everything here describes the code in this repository — `engine.py`,
+`strategy.py`, `config.py`, `alpaca_client.py`, `state.py`, `app.py`. The
+numbers are the defaults in `config.py`.
 
-ARES is a single always-running loop. One pass every 60 seconds:
+## What it trades
 
-1. **Poll.** Read the newest data it needs from Alpaca for each symbol on its
-   watchlist.
-2. **Compute.** Build the indicator values the strategy uses — RSI, MACD and
-   SMA (simple moving average).
-3. **Decide.** Feed those into the model/rule set and get a signal: take a
-   position, hold, or go flat.
-4. **Risk gate.** Reject or shrink the order if it breaks a risk limit
-   (below). This runs *after* the signal, so no signal can bypass it.
-5. **Execute.** Send the order to Alpaca and record what was decided and why.
-6. **Sleep** 60 seconds and start again.
+Crypto on Alpaca, paper account only. Each cycle it asks Alpaca for assets with
+`asset_class=crypto`, `status=active`, and keeps symbols ending in `/USD` or
+`/USDC`. That list is sorted and truncated to `MAX_PAIRS` (56) — a deliberate
+cap so one scan finishes comfortably on a Pi 3 A+. BTC/ETH-quoted crosses are
+excluded.
 
-Because the loop is stateless between passes, a crash costs one cycle, not the
-whole day — it restarts by re-reading market data and current positions.
+`alpaca_client.py` hardcodes the paper host and raises on construction if
+`ALPACA_PAPER` is not `true`. There is no live-trading path in this code.
 
-## Indicators
+## The cycle
 
-| Indicator | What it contributes |
+`Engine._cycle()` runs in a daemon thread, one pass every
+`max(60, POLL_SECONDS)` seconds — 300 s by default.
+
+1. **Account check.** Read equity. If it is unavailable or ≤ 0, raise: no
+   equity means no sizing, so no orders.
+2. **Daily baseline.** On the first cycle of a UTC day, store today's equity as
+   the baseline. If equity is now ≤ baseline × (1 − 3%), write a warning event
+   and set `paused = 1`.
+3. **Universe.** Fetch active crypto assets and filter to the USD/USDC pairs
+   described above.
+4. **Data.** Fetch 36 hours of 15-minute bars for the whole universe in one call
+   (limit 10 000 bars), so the signal has 55+ completed bars per pair.
+5. **Exits first.** For each position this bot opened, compare the broker's
+   current price to the average entry price. At or below 96% of entry, submit a
+   market sell for the full quantity, with the reason `4% protective exit`.
+6. **Pause gate.** If `paused` is set, stop here. Exits above have already run —
+   pausing means *no new entries*, not "do nothing".
+7. **Entries.** For each symbol not already held and not already open: evaluate
+   the signal, size the order, submit a market buy.
+8. **Sleep** until the next cycle.
+
+## The signal
+
+`strategy.signal_for()` is a long-only breakout, computed on the **closed** bars
+only (the newest bar is dropped, since it may be incomplete):
+
+| Component | Rule |
 | --- | --- |
-| RSI | Momentum / overbought-oversold reading |
-| MACD | Trend direction and momentum shifts |
-| SMA | Baseline trend and price-vs-average context |
+| History | needs ≥ 55 bars; every one of the last 55 closes must be > 0 |
+| Trend | SMA(20) of closes > SMA(50) of closes |
+| Breakout | latest close > the highest high of the previous 20 bars |
+| Volume | latest bar's volume ≥ the average volume of those same 20 bars |
 
-The v1 design feeds these values into a model rather than trading a single
-hand-written rule, so the indicator set is the feature set. The exact
-estimator, window lengths and thresholds live in the bot source on the Pi
-and should be documented here once the source is published.
+All four must hold, otherwise the pair is skipped. It is a filter, not a
+prediction: it never sizes up, never shorts, and has no concept of a target
+price.
 
-## Risk controls
+Note what is *not* in this bot despite the earlier v1 description: no RSI, no
+MACD, no machine-learning model, no 60-second polling.
 
-Two hard limits, both cheaper than the alternative:
+## Position sizing
 
-- **2% risk per trade.** Position sizing is derived from the distance to the
-  stop, so the worst case on any one trade is ~2% of account equity. A wider
-  stop therefore buys a *smaller* position, not a bigger loss.
-- **5% daily stop loss.** Once the day's drawdown reaches 5%, ARES stops
-  opening new trades and waits for the next session. This caps a bad day
-  instead of letting one bad loop compound.
+```
+per_position = equity × MAX_POSITION_PCT              # 3%
+remaining    = equity × MAX_TOTAL_EXPOSURE_PCT − Σ open market value   # 15%
+notional     = min(per_position, remaining)
+```
 
-These are the v1 numbers and the values to keep in sync with the code:
+Orders under $5 are skipped, and the loop stops opening positions once
+`MAX_POSITIONS` (5) is reached. Exposure is measured from the broker's
+positions, so on a shared account other positions would count toward the 15% —
+this bot expects a dedicated paper account.
 
-| Limit | Value |
+## Order identity
+
+Each order gets `client_order_id = ares-<b|s>-<hash(side|symbol|timestamp)>`.
+Buy timestamps are the signal bar's time, so a retry of the same bar's signal
+cannot place a second buy; Alpaca deduplicates on the client order id, and the
+`trades` table's primary key enforces it locally too.
+
+## Pause semantics
+
+`paused` is a value in SQLite, initialised to `'1'` — **the bot boots paused**
+and stays that way until someone presses *Resume paper trading* in the
+dashboard. Pausing blocks entries and nothing else: protective exits keep
+running.
+
+Any exception during a cycle logs an `error` event, sets `paused = 1`, and
+changes the status to "Paused after API or data error; inspect logs before
+resuming". That is deliberate (fail closed) but blunt: a single transient
+network failure needs a human to resume. Check the Activity panel before
+blaming the strategy.
+
+## State
+
+`state.py` is plain SQLite (`ares_state.sqlite3`, or `ARES_STATE_PATH`):
+
+- `events` — rolling window of the last 100 log lines shown in the dashboard.
+- `trades` — one row per submitted order; primary key is the client order id.
+- `kv` — `paused`, `baseline_date`, `baseline_equity`.
+
+"Which positions are mine?" is answered from `trades`: the latest row per
+symbol, if its side is `buy`. Exits only apply to those symbols, so a position
+you open by hand is not auto-sold.
+
+## Dashboard
+
+`app.py` starts the engine on import and serves:
+
+| Route | What it does |
 | --- | --- |
-| Risk per trade | 2% of equity |
-| Daily stop loss | 5% of equity |
+| `GET /` | status, scanned pair count, recent orders, activity |
+| `GET /api/state` | the same as JSON |
+| `POST /control/pause` | pause new entries |
+| `POST /control/resume` | resume entries (refuses without paper + dashboard creds) |
 
-The constant names in the source may differ; the numbers must not.
+HTTP Basic auth on every route, compared with `hmac.compare_digest`; if the
+dashboard credentials are unset the app answers 503 instead of running open.
+Control posts must also carry `X-Ares-Action: dashboard`. The page refreshes
+every 30 seconds.
 
-## What it deliberately does not do
-
-- No leverage, no shorting complexity beyond what the signal supports.
-- No live-money endpoint in v1 — paper trading only.
-- No mid-loop strategy changes: behaviour is fixed at start-up, so a run is
-  reproducible from its config and logs.
+Binding is `127.0.0.1` unless both `ARES_TLS_CERT` and `ARES_TLS_KEY` are set —
+see [running.md](running.md) for how access works from another machine.
 
 ## Known gaps
 
-- The Python source, logs and any trained model artefacts are not in the repo
-  yet (they are on the Pi).
-- No backtest harness in v1; correctness is judged from paper-trading results
-  and logs.
+- **No backtest or walk-forward harness.** The rollout plan calls for one; the
+  code does not contain it. Paper results are the only evidence so far.
+- **Exits are polled.** The 4% stop is checked once per cycle and fills at
+  market, so a fast move can fill far below 96% of entry.
+- **The plan promised checks the code does not make.** `docs/rollout-plan.md`
+  lists stale-data and unhealthy-clock guards; `engine.py` has neither. Bar
+  freshness is not compared to the wall clock, so a stalled data feed is not
+  currently detected as such.
+- **Fail-closed is manual.** Any cycle error pauses the bot until resumed by
+  hand — safe, but it means uptime depends on someone noticing.
+- **Ownership is inferred** from the local `trades` table rather than broker
+  metadata, so a wiped state file makes the bot treat its own positions as
+  foreign (it will not exit them).
