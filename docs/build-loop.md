@@ -1,15 +1,17 @@
 # How ARES was built: Claude Code, Codex and Codebuff
 
-Three AI coding tools touched this project, each doing a different job. This is
-who did what, and what to fill in with your own prompts and turning points.
+Three AI coding tools touched this project, each doing a different job.
 
-## Contributors at a glance
+## The bot's progress
 
-| Phase | Tool | Contribution |
-| --- | --- | --- |
-| v1, 2026-10-09 | Claude Code over Ollama | Wrote the bot: data pull, indicators, signal, order submission, risk limits |
-| After v1 | Codex | Reviewed and refactored the loop |
-| 2026-10-23 | Codebuff | Repo structure, documentation, Pi publish tooling — **no trading logic** |
+| When | What happened |
+| --- | --- |
+| 2026-10-09 | **v1** written by Claude Code over Ollama; hosted on PythonAnywhere, polling Alpaca every 60 seconds |
+| After v1 | **Codex** reviewed and refactored the loop |
+| Now | Runs on a **Raspberry Pi 3 Model A+** at home, on paper money |
+
+That is the bot's history. Documentation and repo tooling are tracked
+separately below, because they say nothing about how the strategy evolved.
 
 ## Phase 1 — Claude Code wrote v1
 
@@ -28,11 +30,10 @@ needs the code to already exist, and it works best on correctness and structure
 rather than features. Running the reviewer on the finished loop avoids two
 agents disagreeing over a half-written file.
 
-## Phase 3 — Codebuff organized the repository
+## Phase 3 — Codebuff wrote the docs and the publish path
 
-By October 2026 the repo still held nothing but a README: the strategy, the
-deployment and this history were undocumented, and the bot's actual source lived
-only on the Pi with no route into git. Codebuff added:
+The strategy, the deployment and this history were undocumented, and the bot's
+source lived only on the Pi with no route into git. Codebuff added:
 
 | Added | Purpose |
 | --- | --- |
@@ -43,11 +44,11 @@ only on the Pi with no route into git. Codebuff added:
 | `.gitignore`, `.env.example` | keep secrets and runtime junk out of git |
 | `scripts/publish-from-pi.sh` | publishes the Pi's source into this repo, refusing secrets |
 
-**What it deliberately did not do:** read or modify the trading logic. The
-source was not in the repo, so every strategy statement here comes from your
-README and the deployment description — not from inspecting `bot.py`. Where the
-docs say something the code alone could confirm (model type, indicator windows,
-exact file names), they say so instead of guessing.
+**What it did not do:** touch the trading logic. The source was not in the repo,
+so every strategy statement here comes from the README and the deployment
+description — not from inspecting `bot.py`. Where the code alone could settle a
+question (model type, indicator windows, exact file names), these docs say so
+instead of guessing.
 
 The publish script was tested against a throwaway local repo — first publish,
 idempotent re-run, dry run, hardcoded-key refusal, secret-file refusal and
@@ -70,8 +71,9 @@ for Codebuff.
 ## Reconstructed, not recorded
 
 The paragraphs above describe the shape of the work. The specifics — the exact
-prompts, which model ran behind Ollama, what Codex changed — are not in the
-repo, so they are deliberately not invented here.
+prompts, which model ran behind Ollama, what Codex changed, and when the bot
+moved from PythonAnywhere to the Pi — are not in the repo, so they are
+deliberately not invented here.
 
 To make this a real build log, append below:
 
@@ -79,6 +81,7 @@ To make this a real build log, append below:
 - [ ] The model + Ollama version used locally.
 - [ ] What Codex actually changed (diff summary or the review comment).
 - [ ] The first bug the paper account caught.
+- [ ] The date and reason for the move to the Pi.
 
 ## Why document this at all
 

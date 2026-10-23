@@ -73,11 +73,10 @@ anything on either side. Auth setup and the manual fallback are in
 
 ## Build history
 
-- **2026-10-09 — v1:** built with Claude Code running through Ollama.
-- **Later:** Codex reviewed and refactored the loop.
-- **2026-10-23 — repo:** organized by Codebuff into this docs structure, with
-  the Pi publish script. Documentation and tooling only; no trading logic
-touched.
+- **2026-10-09 — v1:** built with Claude Code running through Ollama, hosted
+  on PythonAnywhere.
+- **After v1 — Codex:** reviewed and refactored the loop.
+- **Now:** runs on a Raspberry Pi 3 Model A+ at home.
 
 Narrative and the actual prompt/test loop: [docs/build-loop.md](docs/build-loop.md).
 
