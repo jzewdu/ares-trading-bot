@@ -1,15 +1,13 @@
-"""Delta-neutral carry loop: long spot, short perp, settled on real funding.
+"""Gear-shift trading loop: read the regime, pick a gear, trade it, learn.
 
-Every cycle the engine marks both legs, settles any funding that has accrued
-since the last settlement, and keeps the two notionals balanced. The long leg
-is priced on Alpaca (the venue that would hold it); the short leg is priced on
-Hyperliquid, whose funding the book collects.
+Each cycle the engine rebuilds 4-hour bars, classifies every coin as trending,
+ranging or no-trade, and only then looks for setups. A trend coin is bought on
+a fresh 20-bar breakout; a range coin is bought at its lower band and sold at
+the middle. Positions are sized from the distance to the stop, so every trade
+risks the same small slice of equity before the learner adjusts it.
 
-The spot leg is a real order on Alpaca's paper account: every entry and exit
-is submitted, filled, and reconciled against the broker's own positions. This
-build has no live short venue behind it, so the short leg is a ledger position
-rather than an exchange order — marks and funding for it still come from
-Hyperliquid's public feed.
+Every exit files the result into `learning.py`, which decays old evidence and
+uses it to shrink, block or lean into the same kind of trade next time.
 """
 from __future__ import annotations
 
@@ -21,28 +19,27 @@ import requests
 
 from alpaca_client import AlpacaClient
 from config import SETTINGS
-from hl_client import HL
-from state import (add_funding, all_positions, close_position, event, funding_events,
-                   get_value, open_position, open_positions, record_decision, record_mark,
-                   recent_marks, set_value)
-from strategy import basis, entry_check, exit_reason, trailing_apr
+from gears import signal_for
+from learning import advice, summary as learn_summary, update as learn_update
+from regime import RANGE, STAND_ASIDE, TREND, aggregate, classify
+from state import (close_trade, closed_trades, event, get_value, open_trade, open_trades,
+                   raise_stop, recent_close, recent_decisions, recent_events, recent_marks,
+                   record_decision, record_mark, set_value, update_high)
 
-SPOT_FEE = 0.0025    # Alpaca crypto taker, spot leg
-PERP_FEE = 0.00045   # Hyperliquid taker, perp leg
-MAX_PRINT_AGE = 300  # seconds before an Alpaca print is treated as stale
-MAX_ORDER_WAIT = 30  # seconds to wait for a crypto market order to fill
+MAX_ORDER_WAIT = 30
+FEE_RATE = 0.0025        # Alpaca crypto taker, taken in coin on buys and in cash on sells
+MAX_PRINT_AGE = 300      # seconds before a quote is too stale to trade on
+DATA_ERRORS_BEFORE_PAUSE = 6
 
 
-def _ms(value: str) -> int:
-    """Accept either an ISO timestamp or raw epoch milliseconds."""
-    text = str(value).strip()
+def _epoch(stamp) -> int:
+    text = str(stamp)
     if text.isdigit():
         return int(text)
-    return int(datetime.fromisoformat(text).timestamp() * 1000)
-
-
-def _now_ms() -> int:
-    return int(datetime.now(timezone.utc).timestamp() * 1000)
+    try:
+        return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp())
+    except ValueError:
+        return int(float(text))
 
 
 def _pair(symbol: str) -> str:
@@ -53,6 +50,24 @@ def _pair(symbol: str) -> str:
     return f"{text[:-3]}/{text[-3:]}"
 
 
+def _hours_since(iso: str) -> float:
+    if not iso:
+        return 0.0
+    try:
+        then = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        return max(0.0, (datetime.now(timezone.utc) - then).total_seconds() / 3600)
+    except ValueError:
+        return 0.0
+
+
+def _score(item) -> float:
+    row = item[1] if isinstance(item, tuple) else item
+    sig = row.get("signal")
+    return float(sig.get("score", 0)) if sig else 0.0
+
+
 class Engine:
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
@@ -61,26 +76,27 @@ class Engine:
         self.status = "Waiting for paper credentials"
         self.last_cycle: str | None = None
         self.last_error: str | None = None
-        self.started_at: str | None = None
         self.ctx: dict[str, dict] = {}
-        self.prices: dict[str, float] = {}
+        self.prices: dict[str, dict] = {}
         self.equity: float = 0.0
-        self.net_delta: float = 0.0
-        self.gross_notional: float = 0.0
-        self.funding_total: float = 0.0
-        self.apr7d: dict[str, float] = {}
-        self._apr7d_at: float = 0.0
-        # Broker-side truth, refreshed every cycle so the ledger can never drift
-        # from what Alpaca actually holds.
-        self.broker: dict[str, float] = {}
+        self.cash: float = 0.0
+        self.exposure: float = 0.0
+        self.realized: float = 0.0
+        self.unrealized: float = 0.0
+        self.fees_total: float = 0.0
+        self.start_equity: float = 0.0
         self.broker_equity: float = 0.0
         self.broker_error: str | None = None
+        self.broker_positions: int = 0
+        self.gear_counts: dict[str, int] = {TREND: 0, RANGE: 0, STAND_ASIDE: 0}
+        self.headline_gear: str = STAND_ASIDE
+        self._data_errors = 0
 
     # ------------------------------------------------------------------ lifecycle
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        self._thread = threading.Thread(target=self._run, name="ares-carry-engine", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="ares-gear-engine", daemon=True)
         self._thread.start()
 
     def _set_status(self, value: str, error: str | None = None) -> None:
@@ -97,472 +113,496 @@ class Engine:
         except Exception as exc:
             self._set_status("Paper-only configuration error", str(exc))
             return
-        self._init_ledger(client)
+        self._init_account(client)
         while not self._stop.is_set():
             try:
                 self._cycle(client)
+                self._data_errors = 0
             except Exception as exc:
+                self._data_errors += 1
                 message = f"{type(exc).__name__}: {exc}"
                 event("error", message)
-                self._set_status("Data error — holding the book; inspect logs", message)
+                self._set_status("Data error — holding positions; inspect logs", message)
+                if self._data_errors >= DATA_ERRORS_BEFORE_PAUSE and get_value("paused", "0") == "0":
+                    set_value("paused", "1")
+                    event("warning", "Six failed cycles in a row; entries paused until the feed recovers")
             self._stop.wait(max(60, SETTINGS.poll_seconds))
 
-    def _init_ledger(self, client: AlpacaClient) -> None:
-        if get_value("dn_cash"):
+    def _init_account(self, client: AlpacaClient) -> None:
+        if get_value("gear_start_equity"):
             return
-        equity = SETTINGS.dn_start_equity
-        if equity <= 0:
-            try:
-                account = client.account()
-                equity = float(account.get("equity", 0) or 0)
-                set_value("dn_cash", f"{float(account.get('cash', 0) or 0):.8f}")
-            except Exception:
-                equity = 0.0
-        if equity <= 0:
-            equity = 100000.0
-        set_value("dn_cash", f"{equity:.8f}")
-        set_value("dn_start_equity", f"{equity:.8f}")
-        set_value("dn_started", datetime.now(timezone.utc).isoformat(timespec="seconds"))
-        set_value("paused", "0")
-        event("info", f"Delta-neutral ledger opened with ${equity:,.2f} of paper capital")
-
-    # ------------------------------------------------------------------ pricing
-    def _prices(self, client: AlpacaClient) -> dict[str, dict]:
-        """Spot marks, with stale Alpaca prints replaced by the index."""
-        symbols = [SETTINGS.spot_symbol(c) for c in SETTINGS.dn_universe]
         try:
-            market = client.latest_market(symbols)
-        except requests.RequestException:
-            market = {}
+            account = client.account()
+            equity = float(account.get("equity", 0) or 0)
+            cash = float(account.get("cash", 0) or 0)
+        except (requests.RequestException, ValueError) as exc:
+            self._set_status("Could not read the paper account", str(exc))
+            return
+        if SETTINGS.start_equity > 0:
+            equity = SETTINGS.start_equity
+        set_value("gear_start_equity", f"{equity:.8f}")
+        set_value("gear_started", datetime.now(timezone.utc).isoformat(timespec="seconds"))
+        if not get_value("paused"):
+            set_value("paused", "0")
+        event("info", f"Gear-shift book opened on ${equity:,.2f} of paper equity "
+                      f"(${cash:,.2f} cash)")
+
+    # ------------------------------------------------------------------ data
+    def _market(self, client: AlpacaClient) -> dict[str, dict]:
+        symbols = [SETTINGS.spot_symbol(c) for c in SETTINGS.universe]
+        try:
+            quotes = client.latest_market(symbols)
+        except requests.RequestException as exc:
+            self.broker_error = str(exc)
+            quotes = {}
         out: dict[str, dict] = {}
-        for coin in SETTINGS.dn_universe:
-            quote = market.get(SETTINGS.spot_symbol(coin), {})
+        for coin in SETTINGS.universe:
+            quote = quotes.get(SETTINGS.spot_symbol(coin), {})
             price = float(quote.get("price", 0) or 0)
-            age = quote.get("age_s")
-            if price > 0 and age is not None and age <= MAX_PRINT_AGE:
-                out[coin] = {"price": price, "source": "alpaca", "age": age,
-                             "spread": quote.get("spread")}
-            elif coin in self.ctx:
-                out[coin] = {"price": self.ctx[coin]["oracle"], "source": "hl-index",
-                             "age": age, "spread": None}
+            if price <= 0:
+                continue
+            out[coin] = {
+                "price": price,
+                "spread": quote.get("spread"),
+                "age": quote.get("age_s"),
+                "source": quote.get("source", "trade"),
+            }
         return out
 
-    def _refresh_apr(self) -> None:
-        """Trailing 7d funding per coin, refreshed hourly rather than each cycle."""
-        now = _now_ms()
-        if self.apr7d and now - self._apr7d_at < 3600 * 1000:
-            return
-        for coin in SETTINGS.dn_universe:
-            try:
-                hist = HL.funding_history(coin, now - 168 * 3600 * 1000, now)
-            except requests.RequestException:
+    def _analyse(self, bars: dict[str, list[dict]]) -> None:
+        ctx: dict[str, dict] = {}
+        for coin in SETTINGS.universe:
+            symbol = SETTINGS.spot_symbol(coin)
+            hourly = []
+            for bar in bars.get(symbol, []):
+                try:
+                    hourly.append({
+                        "ts": _epoch(bar["t"]), "o": float(bar["o"]), "h": float(bar["h"]),
+                        "l": float(bar["l"]), "c": float(bar["c"]),
+                    })
+                except (KeyError, TypeError, ValueError):
+                    continue
+            rows = aggregate(hourly, 4)
+            regimes = classify(rows, SETTINGS)
+            if not regimes:
+                ctx[coin] = {
+                    "coin": coin, "symbol": symbol, "gear": STAND_ASIDE, "direction": "flat",
+                    "stable": 0, "reason": "Waiting for enough 4h history", "signal": None,
+                    "adx": 0.0, "er": 0.0, "atr": 0.0, "atr_pct": 0.0, "rsi": 0.0,
+                    "close": 0.0, "bb_low": 0.0, "bb_mid": 0.0, "bb_up": 0.0,
+                    "bb_width_pct": 0.0, "don_high": 0.0, "don_low": 0.0,
+                    "trend_spread_pct": 0.0, "ts": 0,
+                }
                 continue
-            apr = trailing_apr(hist, now, 168)
-            if apr is not None:
-                self.apr7d[coin] = apr
-        self._apr7d_at = now
-
-    def _cash(self) -> float:
-        return float(get_value("dn_cash", "0") or 0)
-
-    def _save_cash(self, value: float) -> None:
-        set_value("dn_cash", f"{value:.8f}")
+            last = regimes[-1]
+            row = last.as_dict()
+            row["coin"] = coin
+            row["symbol"] = symbol
+            row["signal"] = signal_for(last, SETTINGS)
+            ctx[coin] = row
+        self.ctx = ctx
+        counts = {TREND: 0, RANGE: 0, STAND_ASIDE: 0}
+        for row in ctx.values():
+            counts[row["gear"]] = counts.get(row["gear"], 0) + 1
+        self.gear_counts = counts
+        tradable = counts[TREND] + counts[RANGE]
+        if tradable and counts[TREND] >= counts[RANGE]:
+            self.headline_gear = TREND
+        elif counts[RANGE]:
+            self.headline_gear = RANGE
+        else:
+            self.headline_gear = STAND_ASIDE
 
     # ------------------------------------------------------------------ accounting
-    def _accrue_funding(self, positions: list[dict]) -> None:
-        now = _now_ms()
+    def _mark(self, client: AlpacaClient) -> float:
+        try:
+            account = client.account()
+            self.equity = float(account.get("equity", 0) or 0)
+            self.cash = float(account.get("cash", 0) or 0)
+            self.broker_equity = self.equity
+            self.broker_error = None
+        except (requests.RequestException, ValueError) as exc:
+            self.broker_error = str(exc)
+            positions_value = 0.0
+            for pos in open_trades():
+                quote = self.prices.get(pos["coin"], {})
+                positions_value += pos["qty"] * float(quote.get("price", pos["entry"]))
+            self.equity = self.cash + positions_value
+        positions = open_trades()
+        self.exposure = 0.0
+        self.unrealized = 0.0
         for pos in positions:
-            last = get_value(f"dn_funded_{pos['id']}", "")
-            start = _ms(last) if last else _ms(pos["opened_ts"])
-            # Settlements land hourly; checking each cycle credits them promptly
-            # without re-summing the same window.
-            if now - start < max(300, SETTINGS.poll_seconds) * 1000:
-                continue
-            try:
-                rates = HL.funding_history(pos["coin"], start, now)
-            except requests.RequestException as exc:
-                event("warning", f"Funding fetch failed for {pos['coin']}: {exc}")
-                continue
-            settled = [(ts, rate) for ts, rate in rates if ts > start]
-            if not settled:
-                continue
-            rate_sum = sum(rate for _, rate in settled)
-            amount = pos["notional"] * rate_sum
-            add_funding(pos["id"], pos["coin"], amount, rate_sum)
-            self.funding_total += amount
-            total = float(get_value("dn_funding_all", "0") or 0) + amount
-            set_value("dn_funding_all", f"{total:.8f}")
-            today = datetime.now(timezone.utc).date().isoformat()
-            if get_value("dn_funding_day", "") != today:
-                set_value("dn_funding_day", today)
-                set_value("dn_funding_today", "0")
-            day_total = float(get_value("dn_funding_today", "0") or 0) + amount
-            set_value("dn_funding_today", f"{day_total:.8f}")
-            set_value(f"dn_funded_{pos['id']}", str(settled[-1][0]))
-            if abs(amount) > 0.005:
-                sign = "collected" if amount >= 0 else "paid"
-                event("funding", f"{pos['coin']}: {sign} ${abs(amount):,.2f} funding over {len(settled)}h")
-            pos["funding"] = float(pos.get("funding", 0) or 0) + amount
+            price = float(self.prices.get(pos["coin"], {}).get("price", pos["entry"]))
+            self.exposure += pos["qty"] * price
+            self.unrealized += pos["qty"] * (price - pos["entry"])
+        closed = closed_trades(1000)
+        self.realized = sum(float(t.get("pnl") or 0) for t in closed)
+        self.fees_total = sum(float(t.get("entry_fee") or 0) + float(t.get("exit_fee") or 0)
+                              for t in closed)
+        if not self.start_equity:
+            self.start_equity = float(get_value("gear_start_equity", "0") or 0)
 
-    def _mark(self, positions: list[dict]) -> tuple[float, float, float]:
-        """Book equity from broker cash, mark-to-market legs and accrued funding.
+        today = datetime.now(timezone.utc).date().isoformat()
+        if get_value("gear_baseline_date") != today:
+            set_value("gear_baseline_date", today)
+            set_value("gear_baseline_equity", f"{self.equity:.8f}")
+        baseline = float(get_value("gear_baseline_equity", str(self.equity)) or self.equity)
+        if baseline > 0 and self.equity <= baseline * (1 - SETTINGS.max_daily_loss_pct):
+            if get_value("paused", "0") != "1":
+                set_value("paused", "1")
+                event("warning", f"Daily loss limit: equity ${self.equity:,.2f} vs "
+                                 f"${baseline:,.2f} at UTC open; new entries paused")
+        # Reconcile the book against what Alpaca actually holds so a missing or
+        # stray position can never be invisible.
+        held: dict[str, float] = {}
+        try:
+            # Positions worth less than a dollar are rounding dust from a
+            # previous exit, not something the desk can sell or should flag.
+            held = {_pair(p["symbol"]): float(p.get("qty") or 0)
+                    for p in client.positions()
+                    if float(p.get("market_value") or 0) >= 1.0}
+            self.broker_positions = len(held)
+        except requests.RequestException:
+            self.broker_positions = 0
+        else:
+            for pos in positions:
+                qty = held.get(pos["symbol"])
+                if qty is None or abs(qty - float(pos["qty"])) > float(pos["qty"]) * 0.005:
+                    if not get_value(f"gear_mismatch_{pos['id']}"):
+                        set_value(f"gear_mismatch_{pos['id']}", "1")
+                        event("warning", f"{pos['coin']}: ledger holds {pos['qty']:.8g}, "
+                                         f"Alpaca holds {qty if qty is not None else 0:.8g}")
+            tracked = {pos["symbol"] for pos in positions}
+            stray = sorted(s for s, q in held.items() if q > 0 and s not in tracked)
+            if stray and not get_value("gear_stray_flagged"):
+                set_value("gear_stray_flagged", "1")
+                event("warning", f"Alpaca holds crypto outside the book: {', '.join(stray)}")
+        return self.equity
 
-        Cash is whatever Alpaca reports, so the long leg can never drift from
-        the broker; the short leg's P&L and the collected funding sit on top of
-        that as modelled, real-data positions.
-        """
-        cash = self._cash()
-        spot_value = 0.0
-        delta = 0.0
-        gross = 0.0
-        perp_pnl = 0.0
-        for pos in positions:
+    # ------------------------------------------------------------------ exits
+    def _manage(self, client: AlpacaClient) -> None:
+        for pos in open_trades():
             coin = pos["coin"]
-            spot = self.prices.get(coin, {}).get("price", pos["spot_entry"])
-            perp = self.ctx.get(coin, {}).get("mark", pos["perp_entry"])
-            value = pos["spot_qty"] * spot
-            spot_value += value
-            delta += value - pos["perp_qty"] * perp
-            gross += value + pos["perp_qty"] * perp
-            perp_pnl += pos["perp_qty"] * (pos["perp_entry"] - perp)
-        funding = float(get_value("dn_funding_all", "0") or 0)
-        # Closed pairs keep the short leg's realised P&L; without this the book
-        # would silently forget it when the pair left the open set.
-        perp_pnl += float(get_value("dn_perp_realized", "0") or 0)
-        # Modelled short-leg fees are not paid out of broker cash, so they are
-        # subtracted here to keep the book's P&L identical to its cost basis.
-        modelled = float(get_value("dn_perp_fees", "0") or 0)
-        equity = cash + spot_value + perp_pnl + funding - modelled
-        return equity, (delta / equity if equity else 0.0), gross
-
-    # ------------------------------------------------------------------ decisions
-    def _manage(self, client: AlpacaClient, ctx: dict[str, dict], prices: dict[str, float],
-                equity: float) -> None:
-        now = _now_ms()
-        paused = get_value("paused", "1") != "0"
-        positions = open_positions()
-        held = {p["coin"] for p in positions}
-
-        for pos in positions:
-            coin = pos["coin"]
-            row = ctx.get(coin)
-            mark_info = prices.get(coin, {})
-            spot = mark_info.get("price", pos["spot_entry"])
-            if not row or spot <= 0:
-                record_decision(pos["symbol"], "HOLD", "No fresh two-venue price; holding the hedge", spot)
+            quote = self.prices.get(coin, {})
+            price = float(quote.get("price", 0) or 0)
+            row = self.ctx.get(coin, {})
+            if price <= 0 or not row:
                 continue
-            premium = row["premium"]
-            gap = basis(spot, row["mark"])
-            try:
-                hist = HL.funding_history(coin, now - 72 * 3600 * 1000, now)
-            except requests.RequestException:
-                hist = []
-            apr72 = trailing_apr(hist, now, 72)
-            reason = exit_reason(apr72, premium, SETTINGS.dn_exit_apr, SETTINGS.dn_max_premium)
-            if reason:
-                if self._close(client, pos, spot, row["mark"], reason):
-                    held.discard(coin)
+            update_high(pos["id"], price)
+            high = max(float(pos.get("high_price") or pos["entry"]), price)
+            held_days = _hours_since(pos["opened_ts"]) / 24
+            reason = None
+            if price <= pos["stop"]:
+                reason = f"stop at {pos['stop']:.6g}"
+            elif price >= pos["target"]:
+                reason = f"target at {pos['target']:.6g}"
+            elif pos["gear"] == TREND:
+                if row["gear"] == STAND_ASIDE and row["direction"] == "down" and row.get("stable", 0) >= 2:
+                    reason = "trend reversed — leaving before the stop"
+                elif held_days >= SETTINGS.trend_max_days:
+                    reason = f"{SETTINGS.trend_max_days:.0f}-day time stop"
+                else:
+                    trail = high - SETTINGS.trail_atr * float(row["atr"])
+                    if trail > pos["stop"]:
+                        raise_stop(pos["id"], trail)
+                        record_decision(pos["symbol"], "TRAIL",
+                                        f"Stop raised to {trail:.6g} ({SETTINGS.trail_atr:.0f} ATR "
+                                        f"below the high {high:.6g})", price)
             else:
-                state = "HOLD"
-                detail = (f"Funding {apr72:+.1f}% APR (72h) to the short; perp premium "
-                          f"{premium * 100:+.3f}%, venue gap {gap * 100:+.3f}%; exits at "
-                          f"{SETTINGS.dn_exit_apr:.1f}% APR or {SETTINGS.dn_max_premium * 100:.1f}% premium") \
-                         if apr72 is not None else "Building 72h funding history; holding the hedge"
-                record_decision(pos["symbol"], state, detail, spot, row["mark"], premium * 100)
+                if row["gear"] != RANGE and row.get("stable", 0) >= 2:
+                    reason = "range broke — the trend no longer suits this gear"
+                elif held_days >= SETTINGS.range_max_days:
+                    reason = f"{SETTINGS.range_max_days:.0f}-day time stop"
+            if reason:
+                self._sell(client, pos, price, reason)
 
-        if paused or equity <= 0:
+    def _sell(self, client: AlpacaClient, pos: dict, price: float, reason: str) -> bool:
+        symbol = pos["symbol"]
+        try:
+            held = {_pair(p["symbol"]): p for p in client.positions()}
+        except requests.RequestException:
+            held = {}
+        # Sell the broker's own quantity string. Rounding 1633.614775495 to 8
+        # decimals rounds *up* past the balance, and Alpaca rejects the order
+        # with a 403; the raw string is always covered by the position.
+        held_pos = held.get(symbol) or {}
+        qty = float(held_pos.get("qty") or 0) or float(pos["qty"])
+        if qty <= 0:
+            event("error", f"{pos['coin']}: no position to sell; trade left open")
+            return False
+        sell_qty = str(held_pos.get("qty") or "").strip()
+        if not sell_qty or "e" in sell_qty.lower():
+            sell_qty = AlpacaClient.qty_string(qty)
+        try:
+            before = float(client.account().get("cash", 0) or 0)
+            submitted = client.market_sell(symbol, sell_qty,
+                                           f"ares-x-{pos['coin'].lower()}-{int(time.time() * 1000)}")
+            order = client.wait_fill(submitted["id"], MAX_ORDER_WAIT)
+            after = float(client.account().get("cash", 0) or 0)
+        except (requests.RequestException, KeyError) as exc:
+            event("error", f"{pos['coin']}: exit order failed — {exc}; still holding")
+            return False
+        filled = float(order.get("filled_qty") or 0)
+        fill = float(order.get("filled_avg_price") or 0)
+        if order.get("status") != "filled" or filled <= 0 or fill <= 0:
+            event("error", f"{pos['coin']}: exit {order.get('status', 'unknown')} — still holding")
+            return False
+        proceeds = max(0.0, after - before)
+        fee = filled * fill - proceeds
+        if not 0 <= fee <= filled * fill * 0.02:
+            fee = filled * fill * FEE_RATE
+        pnl = proceeds - float(pos["cost"])
+        risk = float(pos["risk_usd"]) or 1.0
+        r_multiple = pnl / risk
+        hold = _hours_since(pos["opened_ts"])
+        decision_note = (f"{pos['gear']} {pos['coin']} closed at {fill:.6g} ({reason}); "
+                         f"net ${pnl:+,.2f}, {r_multiple:+.2f}R")
+        trade = dict(pos, pnl=pnl, r_multiple=r_multiple)
+        lessons = learn_update(trade)
+        lesson = " · ".join(lessons[-2:]) if lessons else ""
+        close_trade(pos["id"], fill, proceeds, fee, pnl, r_multiple, hold, reason, lesson,
+                    order.get("id"))
+        event("trade", f"CLOSE {pos['coin']} [{pos['gear']}] {r_multiple:+.2f}R "
+                       f"(${pnl:+,.2f}) — {reason}. {lesson}")
+        record_decision(symbol, "SELL", decision_note, fill)
+        self.realized += pnl
+        return True
+
+    # ------------------------------------------------------------------ entries
+    def _enter(self, client: AlpacaClient) -> None:
+        if get_value("paused", "0") != "0" or self.equity <= 0:
             return
-        slots = max(1, SETTINGS.dn_slots)
-        target = equity * SETTINGS.dn_notional_pct / slots
-        for coin in SETTINGS.dn_universe:
-            if len(held) >= slots:
+        held = {pos["coin"] for pos in open_trades()}
+        exposure = self.exposure
+        if len(held) >= SETTINGS.max_positions:
+            return
+        for coin, row in sorted(self.ctx.items(), key=_score, reverse=True):
+            if len(held) >= SETTINGS.max_positions:
                 break
             if coin in held:
                 continue
-            row = ctx.get(coin)
-            mark_info = prices.get(coin, {})
-            spot = mark_info.get("price", 0.0)
-            if not row or not spot:
-                record_decision(SETTINGS.spot_symbol(coin), "SKIP", "Missing spot or perp price", spot)
+            signal = row.get("signal")
+            quote = self.prices.get(coin, {})
+            price = float(quote.get("price", 0) or 0)
+            symbol = row["symbol"]
+            if not signal or price <= 0:
                 continue
-            premium = row["premium"]
-            gap = basis(spot, row["mark"])
-            apr = self.apr7d.get(coin, row["funding_apr"])
-            ok, why = entry_check(row, apr, premium, SETTINGS.dn_enter_apr, SETTINGS.dn_max_premium,
-                                  gap=gap, max_gap=0.01, spread=mark_info.get("spread"),
-                                  max_spread=SETTINGS.dn_max_spread)
-            source = mark_info.get("source", "alpaca")
-            if source != "alpaca":
-                why += f" · spot marked on Hyperliquid index (Alpaca print stale)"
-            record_decision(SETTINGS.spot_symbol(coin), "BUY" if ok else "SKIP", why, spot, row["mark"], premium * 100)
-            if ok and self._open(client, coin, spot, row["mark"], premium, target):
+            if signal["score"] < 50:
+                continue
+            spread = quote.get("spread")
+            age = quote.get("age")
+            if age is not None and age > MAX_PRINT_AGE:
+                record_decision(symbol, "SKIP", f"Alpaca print is {age / 60:.0f} min old; "
+                                                f"not entering on a stale price", price)
+                continue
+            if spread is None:
+                record_decision(symbol, "SKIP", "No live bid/ask; entry cost cannot be priced", price)
+                continue
+            if spread > SETTINGS.max_spread:
+                record_decision(symbol, "SKIP",
+                                f"Spot spread {spread * 100:.2f}% is above the "
+                                f"{SETTINGS.max_spread * 100:.2f}% cost gate", price)
+                continue
+            move = abs(price - signal["entry_ref"]) / max(row["atr"], 1e-12)
+            if move > 0.75:
+                record_decision(symbol, "SKIP",
+                                f"Signal is stale: price has travelled {move:.1f} ATR since the "
+                                f"4h close ({signal['entry_ref']:.6g})", price)
+                continue
+            last = recent_close(coin)
+            if last and _hours_since(last.get("closed_ts", "")) * 60 < SETTINGS.cooldown_minutes:
+                continue
+            view = advice(signal["gear"], coin, float(row["adx"]), float(row["atr_pct"]))
+            if view["mult"] <= 0:
+                record_decision(symbol, "SKIP", f"Learned avoid — {view['note']}", price,
+                                signal["entry_ref"], spread * 100)
+                continue
+            risk_usd = self.equity * SETTINGS.risk_pct * view["mult"]
+            stop_dist = float(signal["stop_dist"])
+            if stop_dist <= 0:
+                continue
+            qty_by_risk = risk_usd / stop_dist
+            notional = min(
+                qty_by_risk * price,
+                self.equity * SETTINGS.max_position_pct,
+                max(0.0, self.equity * SETTINGS.max_exposure_pct - exposure),
+                self.cash * 0.95 if self.cash else self.equity,
+            )
+            if notional < SETTINGS.min_notional:
+                record_decision(symbol, "SKIP",
+                                f"Risk-sized position ${notional:,.2f} is below the "
+                                f"${SETTINGS.min_notional:,.0f} minimum", price)
+                continue
+            if self._open(client, coin, symbol, signal, row, price, notional, stop_dist,
+                          view, spread):
                 held.add(coin)
+                exposure += notional
+        self.exposure = exposure
 
-    def _add_fees(self, fee: float, modelled: float = 0.0) -> None:
-        set_value("dn_fees_all", f"{float(get_value('dn_fees_all', '0') or 0) + fee:.8f}")
-        if modelled:
-            set_value("dn_perp_fees", f"{float(get_value('dn_perp_fees', '0') or 0) + modelled:.8f}")
-
-    def _open(self, client: AlpacaClient, coin: str, spot: float, perp: float,
-              premium: float, notional: float) -> bool:
-        """Buy the spot leg on Alpaca, then book the hedge from the actual fill."""
-        symbol = SETTINGS.spot_symbol(coin)
-        client_order_id = f"ares-{coin.lower()}-{int(time.time() * 1000)}"
+    def _open(self, client: AlpacaClient, coin: str, symbol: str, signal: dict, row: dict,
+              price: float, notional: float, stop_dist: float, view: dict,
+              spread: float | None) -> bool:
+        order_id = f"ares-{coin.lower()}-{int(time.time() * 1000)}"
         try:
             before = float(client.account().get("cash", 0) or 0)
-            submitted = client.market_buy(symbol, notional, client_order_id)
+            submitted = client.market_buy(symbol, notional, order_id)
             order = client.wait_fill(submitted["id"], MAX_ORDER_WAIT)
         except (requests.RequestException, KeyError) as exc:
-            event("error", f"{coin}: Alpaca spot order failed — {exc}")
-            record_decision(symbol, "ERROR", f"Spot order failed: {exc}", spot, perp)
+            event("error", f"{coin}: Alpaca buy failed — {exc}")
+            record_decision(symbol, "ERROR", f"Buy failed: {exc}", price)
             return False
         if order.get("status") != "filled" or float(order.get("filled_qty") or 0) <= 0:
-            event("error", f"{coin}: spot order {order.get('status', 'unknown')} — "
-                           f"no fill, hedge not opened")
-            record_decision(symbol, "ERROR", f"Spot order {order.get('status')} — no fill", spot, perp)
+            event("error", f"{coin}: buy {order.get('status', 'unknown')} — no fill")
+            record_decision(symbol, "ERROR", f"Buy {order.get('status')} — no fill", price)
             return False
-        # Alpaca charges its crypto fee in coin, so the broker's position — not
-        # the order — is the truth about what the book now holds, and the hedge
-        # is sized from that position rather than from the requested notional.
         try:
             held = {_pair(p["symbol"]): p for p in client.positions()}
             after = float(client.account().get("cash", 0) or 0)
         except requests.RequestException as exc:
-            event("error", f"{coin}: could not confirm the spot fill — {exc}")
+            event("error", f"{coin}: could not confirm the fill — {exc}")
             return False
         position = held.get(symbol) or {}
         qty = float(position.get("qty") or 0)
         if qty <= 0:
-            event("error", f"{coin}: order filled but no broker position appeared; hedge not booked")
+            event("error", f"{coin}: order filled but no broker position appeared")
             return False
-        entry = float(position.get("avg_entry_price") or 0) or spot
-        basis = float(position.get("cost_basis") or 0) or qty * entry
-        spent = max(0.0, before - after)
-        spot_fee = spent - basis
-        if not 0 <= spot_fee <= basis * 0.02:
-            spot_fee = basis * SPOT_FEE
-        perp_qty = basis / perp
-        perp_fee = basis * PERP_FEE
-        fee = spot_fee + perp_fee
-        self._save_cash(after)
-        self._add_fees(fee, perp_fee)
-        pid = open_position(coin, symbol, basis, qty, perp_qty, entry, perp, premium, fee,
-                            order.get("id"))
-        set_value(f"dn_funded_{pid}", str(_now_ms()))
-        event("trade", f"OPEN {coin}: bought {qty:.8g} spot on Alpaca at {entry:.6g} "
-                       f"(${basis:,.2f}, fee ${fee:,.2f}, order {str(order.get('id'))[:8]}), "
-                       f"short ${basis:,.2f} perp at {perp:.6g} (basis {premium * 100:+.2f}%)")
-        record_decision(symbol, "FILLED", f"Spot filled at {entry:.6g} on Alpaca order "
-                                          f"{str(order.get('id'))[:8]}; perp hedge booked on "
-                                          f"the broker's own quantity", entry, perp)
+        entry = float(position.get("avg_entry_price") or 0) or price
+        cost = max(0.0, before - after)
+        entry_fee = cost - qty * entry
+        if not 0 <= entry_fee <= cost * 0.02:
+            entry_fee = cost * FEE_RATE
+        # Anchor the stop and target to the real fill so slippage does not
+        # silently change the risk of the trade.
+        stop = entry - stop_dist
+        target_dist = float(signal["target"]) - float(signal["entry_ref"])
+        target = entry + target_dist
+        if target <= entry:
+            target = entry + stop_dist * 1.5
+        risk_usd = qty * stop_dist
+        trade_id = open_trade(coin, symbol, signal["gear"], signal["setup"], entry, qty, cost,
+                              stop, target, risk_usd, qty * entry, entry_fee,
+                              signal["features"], float(signal["score"]), order.get("id"))
+        event("trade", f"OPEN {coin} [{signal['gear']}/{signal['setup']}] {qty:.8g} @ "
+                       f"{entry:.6g} (${qty * entry:,.2f}) — stop {stop:.6g}, target "
+                       f"{target:.6g} ({signal['rr']:.2f}R), risk ${risk_usd:,.2f} "
+                       f"(x{view['mult']:.2f} learned sizing), order {str(order.get('id'))[:8]}")
+        record_decision(symbol, "BUY",
+                        f"{signal['why']}. {view['note']}", entry, target, (spread or 0) * 100)
         return True
-
-    def _close(self, client: AlpacaClient, pos: dict, spot: float, perp: float, reason: str) -> bool:
-        """Sell the spot leg on Alpaca; only then close the ledger pair."""
-        symbol = pos["symbol"]
-        client_order_id = f"ares-x-{pos['coin'].lower()}-{int(time.time() * 1000)}"
-        # Sell exactly what the broker holds, so rounding never strands dust.
-        qty = pos["spot_qty"]
-        try:
-            held = {_pair(p["symbol"]): float(p.get("qty") or 0) for p in client.positions()}
-            if held.get(symbol, 0) > 0:
-                qty = held[symbol]
-            before = float(client.account().get("cash", 0) or 0)
-            submitted = client.market_sell(symbol, AlpacaClient.qty_string(qty),
-                                           client_order_id)
-            order = client.wait_fill(submitted["id"], MAX_ORDER_WAIT)
-            after = float(client.account().get("cash", 0) or 0)
-        except requests.RequestException as exc:
-            event("error", f"{pos['coin']}: exit order failed — {exc}; still holding the pair")
-            return False
-        filled_qty = float(order.get("filled_qty") or 0)
-        fill = float(order.get("filled_avg_price") or 0)
-        if order.get("status") != "filled" or filled_qty <= 0 or fill <= 0:
-            event("error", f"{pos['coin']}: exit order {order.get('status', 'unknown')} — "
-                           f"still holding the pair")
-            return False
-        received = max(0.0, after - before)
-        gross = filled_qty * fill
-        spot_fee = gross - received
-        if not 0 <= spot_fee <= gross * 0.02:
-            spot_fee = gross * SPOT_FEE
-        perp_fee = gross * PERP_FEE
-        fee = spot_fee + perp_fee
-        self._save_cash(after)
-        self._add_fees(fee, perp_fee)
-        realized = float(get_value("dn_perp_realized", "0") or 0) \
-            + pos["perp_qty"] * (pos["perp_entry"] - perp)
-        set_value("dn_perp_realized", f"{realized:.8f}")
-        close_position(pos["id"], fill, perp, reason, order.get("id"))
-        event("trade", f"CLOSE {pos['coin']}: sold {filled_qty:.8g} spot at {fill:.6g} on Alpaca; "
-                       f"{reason}. Received ${received:,.2f}")
-        return True
-
-    def _reconcile(self, client: AlpacaClient, positions: list[dict]) -> None:
-        """Compare the ledger with what the broker actually holds."""
-        try:
-            self.broker = {_pair(p["symbol"]): float(p.get("qty") or 0) for p in client.positions()}
-            account = client.account()
-            self.broker_equity = float(account.get("equity", 0) or 0)
-            # The broker's cash is the ledger's cash: nothing is netted by hand.
-            self._save_cash(float(account.get("cash", 0) or 0))
-            self.broker_error = None
-        except requests.RequestException as exc:
-            self.broker_error = str(exc)
-            return
-        for pos in positions:
-            held = self.broker.get(pos["symbol"], 0.0)
-            want = pos["spot_qty"]
-            ok = want > 0 and abs(held - want) <= want * 0.005
-            if not ok and not get_value(f"dn_mismatch_{pos['id']}"):
-                set_value(f"dn_mismatch_{pos['id']}", "1")
-                event("warning", f"{pos['coin']}: ledger holds {want:.8g} spot, Alpaca holds {held:.8g}")
-        tracked = {p["symbol"] for p in positions}
-        stray = sorted(s for s, qty in self.broker.items() if qty > 0 and s not in tracked)
-        if stray and not get_value("dn_stray_flagged"):
-            set_value("dn_stray_flagged", "1")
-            event("warning", f"Alpaca holds crypto outside the book: {', '.join(stray)}")
 
     # ------------------------------------------------------------------ cycle
     def _cycle(self, client: AlpacaClient) -> None:
-        self.ctx = HL.context()
-        self.prices = self._prices(client)
-        self._refresh_apr()
-        positions = open_positions()
-        self._accrue_funding(positions)
-
-        equity, net_delta, gross = self._mark(positions)
-        today = datetime.now(timezone.utc).date().isoformat()
-        if get_value("dn_baseline_date") != today:
-            set_value("dn_baseline_date", today)
-            set_value("dn_baseline_equity", f"{equity:.8f}")
-        baseline = float(get_value("dn_baseline_equity", str(equity)) or equity)
-        if baseline > 0 and equity <= baseline * (1 - SETTINGS.max_daily_loss_pct):
-            if get_value("paused", "1") != "1":
-                set_value("paused", "1")
-                event("warning", f"Daily loss limit: equity ${equity:,.2f} vs baseline ${baseline:,.2f}; entries paused")
-
-        self._manage(client, self.ctx, self.prices, equity)
-        positions = open_positions()
-        self._reconcile(client, positions)
-        equity, net_delta, gross = self._mark(positions)
-        funding_cum = sum(float(p.get("funding", 0) or 0) for p in positions)
-        record_mark(equity, net_delta, gross, funding_cum)
-
+        self.prices = self._market(client)
+        if not self.prices:
+            raise RuntimeError("Alpaca returned no crypto quotes")
+        symbols = [SETTINGS.spot_symbol(c) for c in SETTINGS.universe]
+        bars = client.bars(symbols, days=SETTINGS.bars_days)
+        self._analyse(bars)
+        self._mark(client)
+        self._manage(client)
+        self._enter(client)
+        self._mark(client)
+        record_mark(self.equity, self.exposure, len(open_trades()), self.headline_gear, self.cash)
         with self._lock:
-            self.equity = equity
-            self.net_delta = net_delta
-            self.gross_notional = gross
-            self.funding_total = funding_cum
+            self.start_equity = float(get_value("gear_start_equity", "0") or 0)
             self.last_cycle = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            self.status = "Carry book live" if get_value("paused", "1") == "0" else "Paused — holding hedges"
+            self.status = ("Trading the trend gear" if self.headline_gear == TREND else
+                           "Trading the range gear" if self.headline_gear == RANGE else
+                           "Standing aside — no clean regime")
             self.last_error = None
 
     # ------------------------------------------------------------------ dashboard
-    def _basis_pnl(self) -> float:
-        """Price P&L of both legs, from each leg's own venue mark."""
-        total = 0.0
-        for pos in all_positions():
-            if pos["status"] == "closed":
-                spot, perp = pos["exit_spot"], pos["exit_perp"]
-            else:
-                mark_info = self.prices.get(pos["coin"], {})
-                spot = mark_info.get("price", pos["spot_entry"])
-                perp = self.ctx.get(pos["coin"], {}).get("mark", pos["perp_entry"])
-            if spot is None or perp is None:
-                continue
-            total += pos["spot_qty"] * (spot - pos["spot_entry"])
-            total += pos["perp_qty"] * (pos["perp_entry"] - perp)
-        return total
-
     def snapshot(self) -> dict:
         with self._lock:
-            positions = open_positions()
-            cash = self._cash()
-            start = float(get_value("dn_start_equity", "0") or 0)
-            today = datetime.now(timezone.utc).date().isoformat()
-            marks = recent_marks(1)
+            positions = open_trades()
             book = []
             for pos in positions:
-                coin = pos["coin"]
-                row = self.ctx.get(coin, {})
-                mark_info = self.prices.get(coin, {})
-                spot = mark_info.get("price", pos["spot_entry"])
-                perp = row.get("mark", pos["perp_entry"])
-                premium = row.get("premium", basis(spot, perp))
-                gap = basis(spot, perp)
-                pnl_spot = pos["spot_qty"] * (spot - pos["spot_entry"])
-                pnl_perp = pos["perp_qty"] * (pos["perp_entry"] - perp)
+                price = float(self.prices.get(pos["coin"], {}).get("price", pos["entry"]))
+                pnl = pos["qty"] * (price - pos["entry"])
+                risk = float(pos["risk_usd"]) or 1.0
+                span = max(pos["target"] - pos["stop"], 1e-12)
                 book.append({
-                    "id": pos["id"], "coin": coin, "symbol": pos["symbol"],
-                    "opened": pos["opened_ts"], "notional": pos["notional"],
-                    "spot_entry": pos["spot_entry"], "spot": spot,
-                    "perp_entry": pos["perp_entry"], "perp": perp,
-                    "premium": premium, "entry_premium": pos["entry_premium"],
-                    "funding": float(pos.get("funding", 0) or 0),
-                    "pnl_spot": pnl_spot, "pnl_perp": pnl_perp,
-                    "net": pnl_spot + pnl_perp + float(pos.get("funding", 0) or 0),
-                    "funding_apr": row.get("funding_apr", 0.0),
-                    "apr7d": self.apr7d.get(coin, row.get("funding_apr", 0.0)),
-                    "margin": pos["notional"] * SETTINGS.dn_margin_pct,
-                    "venue_gap": gap,
-                    "spot_source": mark_info.get("source", "alpaca"),
-                    "spot_age": mark_info.get("age"),
+                    "id": pos["id"], "coin": pos["coin"], "symbol": pos["symbol"],
+                    "gear": pos["gear"], "setup": pos["setup"],
+                    "opened": pos["opened_ts"], "hold_hours": _hours_since(pos["opened_ts"]),
+                    "entry": pos["entry"], "price": price, "qty": pos["qty"],
+                    "notional": pos["notional"], "cost": pos["cost"],
+                    "stop": pos["stop"], "target": pos["target"],
+                    "risk_usd": risk, "pnl": pnl, "pnl_pct": pnl / pos["cost"] * 100 if pos["cost"] else 0,
+                    "r_now": pnl / risk if risk else 0,
+                    "progress": max(0.0, min(1.0, (price - pos["stop"]) / span)),
+                    "high": pos.get("high_price") or pos["entry"],
+                    "score": pos.get("score"), "adx": pos.get("adx"),
+                    "er": pos.get("er"), "atr_pct": pos.get("atr_pct"),
                     "order_id": pos.get("order_id"),
-                    "broker_qty": self.broker.get(pos["symbol"], 0.0),
-                    "broker_ok": (pos["spot_qty"] > 0 and
-                                  abs(self.broker.get(pos["symbol"], 0.0) - pos["spot_qty"])
-                                  <= pos["spot_qty"] * 0.005),
                 })
-            carry = 0.0
-            weight = 0.0
-            for b in book:
-                carry += b["apr7d"] * b["notional"]
-                weight += b["notional"]
             universe = []
-            for coin in SETTINGS.dn_universe:
+            for coin in SETTINGS.universe:
                 row = self.ctx.get(coin, {})
-                mark_info = self.prices.get(coin, {})
-                spot = mark_info.get("price", 0.0)
+                quote = self.prices.get(coin, {})
+                signal = row.get("signal")
+                age = quote.get("age")
+                held = any(p["coin"] == coin for p in book)
+                if held:
+                    action = "in position"
+                elif signal:
+                    action = f"{signal['setup']} ready"
+                elif row.get("gear") == STAND_ASIDE and row.get("direction") == "down":
+                    action = "stand aside (downtrend)"
+                elif row.get("gear") == STAND_ASIDE:
+                    action = "no clean gear"
+                else:
+                    action = "waiting for setup"
                 universe.append({
-                    "coin": coin, "symbol": SETTINGS.spot_symbol(coin),
-                    "funding_apr": row.get("funding_apr", 0.0),
-                    "apr7d": self.apr7d.get(coin, row.get("funding_apr", 0.0)),
-                    "premium": row.get("premium", 0.0),
-                    "gap": basis(spot, row["mark"]) if spot else 0.0,
-                    "spot": spot, "mark": row.get("mark", 0.0),
-                    "source": mark_info.get("source", "-"),
-                    "age": mark_info.get("age"),
-                    "spread": mark_info.get("spread"),
-                    "in_book": any(b["coin"] == coin for b in book),
+                    "coin": coin, "symbol": row.get("symbol", SETTINGS.spot_symbol(coin)),
+                    "price": quote.get("price", 0.0), "spread": quote.get("spread"),
+                    "age": age, "source": quote.get("source"),
+                    "gear": row.get("gear", STAND_ASIDE), "direction": row.get("direction", "flat"),
+                    "adx": row.get("adx", 0.0), "er": row.get("er", 0.0),
+                    "atr_pct": row.get("atr_pct", 0.0), "rsi": row.get("rsi", 0.0),
+                    "stable": row.get("stable", 0),
+                    "score": (signal or {}).get("score", 0),
+                    "setup": (signal or {}).get("setup"),
+                    "rr": (signal or {}).get("rr"),
+                    "reason": row.get("reason", "Waiting for data"),
+                    "action": action, "held": held,
                 })
+            marks = recent_marks(600)
+            closed = closed_trades(24)
+            learner = learn_summary()
+            net = self.equity - self.start_equity if self.start_equity else 0.0
             return {
                 "status": self.status, "last_cycle": self.last_cycle, "last_error": self.last_error,
-                "paused": get_value("paused", "1") != "0", "paper": SETTINGS.paper,
-                "broker_equity": self.broker_equity, "broker_positions": len(self.broker),
-                "broker_error": self.broker_error,
-                "started": get_value("dn_started", ""),
-                "start_equity": start, "equity": self.equity, "cash": cash,
-                "funding_total": float(get_value("dn_funding_all", "0") or 0),
-                "fees_total": float(get_value("dn_fees_all", "0") or 0),
-                "basis_total": self._basis_pnl(),
-                "funding_today": float(get_value("dn_funding_today", "0") or 0),
-                "funding_day": get_value("dn_funding_day", ""),
-                "net_delta_pct": self.net_delta * 100,
-                "gross_notional": self.gross_notional,
-                "margin_used": sum(b["margin"] for b in book),
-                "carry_apr": (carry / weight) if weight else 0.0,
-                "slots": SETTINGS.dn_slots, "universe": universe, "book": book,
-                "leverage": 1 / SETTINGS.dn_margin_pct,
-                "marks": marks,
-                "all_marks": recent_marks(600),
-                "funding_events": funding_events(18),
+                "paused": get_value("paused", "0") != "0", "paper": SETTINGS.paper,
+                "gear": self.headline_gear, "gear_counts": self.gear_counts,
+                "equity": self.equity, "start_equity": self.start_equity,
+                "broker_equity": self.broker_equity, "broker_error": self.broker_error,
+                "broker_positions": self.broker_positions,
+                "cash": self.cash, "exposure": self.exposure,
+                "exposure_pct": (self.exposure / self.equity * 100) if self.equity else 0.0,
+                "realized": self.realized, "unrealized": self.unrealized,
+                "fees": self.fees_total,
+                "net": net, "net_pct": (net / self.start_equity * 100) if self.start_equity else 0.0,
+                "open_count": len(book), "max_positions": SETTINGS.max_positions,
+                "risk_pct": SETTINGS.risk_pct * 100,
+                "open_risk": sum(b["risk_usd"] for b in book),
+                "book": book, "universe": universe,
+                "learner": learner, "closed": closed,
+                "marks": marks, "all_marks": marks,
+                "decisions": recent_decisions(120), "events": recent_events(20),
+                "started": get_value("gear_started", ""),
                 "config": {
-                    "notional_pct": SETTINGS.dn_notional_pct, "slots": SETTINGS.dn_slots,
-                    "enter_apr": SETTINGS.dn_enter_apr, "exit_apr": SETTINGS.dn_exit_apr,
-                    "max_premium": SETTINGS.dn_max_premium, "margin_pct": SETTINGS.dn_margin_pct,
-                    "max_spread": SETTINGS.dn_max_spread,
-                    "spot_fee": SPOT_FEE, "perp_fee": PERP_FEE,
+                    "trend_adx": SETTINGS.trend_adx, "trend_er": SETTINGS.trend_er,
+                    "range_adx": SETTINGS.range_adx, "range_er": SETTINGS.range_er,
+                    "trend_stop_atr": SETTINGS.trend_stop_atr,
+                    "trend_target_atr": SETTINGS.trend_target_atr,
+                    "range_stop_atr": SETTINGS.range_stop_atr,
+                    "trail_atr": SETTINGS.trail_atr,
+                    "max_spread": SETTINGS.max_spread,
+                    "risk_pct": SETTINGS.risk_pct,
+                    "max_positions": SETTINGS.max_positions,
+                    "max_position_pct": SETTINGS.max_position_pct,
+                    "max_exposure_pct": SETTINGS.max_exposure_pct,
                 },
             }
 

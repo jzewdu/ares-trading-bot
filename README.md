@@ -1,136 +1,160 @@
-# Ares Crypto Bot — delta-neutral carry desk
+# Ares — gear-shift crypto desk
 
-A small Python service for a Raspberry Pi 3 Model A+ that holds a market-neutral
-crypto book: long spot, short the matching perpetual, collecting funding. It
-runs in paper mode only and shows its book in an authenticated local dashboard.
+A small Python service for a Raspberry Pi 3 Model A+ that reads the market on
+closed 4-hour bars, selects a **gear** — trend, range, or stand aside — trades
+the setup that fits it, and then scores every closed trade so the next one of
+its kind is sized up, sized down, or refused.
 
-## The trade
+Paper only. Every entry and exit is a real order on the Alpaca paper account.
 
-Each pair is two legs of equal notional:
+## The three gears
 
-- **long spot** on Alpaca — a live paper order, filled and confirmed,
-- **short perpetual** on Hyperliquid (priced at Hyperliquid's mark).
+| Gear | Test on the last closed 4h bar | What it trades |
+| --- | --- | --- |
+| **Trend** | ADX ≥ 25, Kaufman efficiency ≥ 0.30, EMA20 at least 0.35% above EMA60 and price above EMA60 | Buy a fresh break of the prior 20-bar high, trail 4.5 ATR |
+| **Range** | ADX ≤ 22, efficiency ≤ 0.22, Bollinger width ≥ 1.5% | Buy the lower band with RSI ≤ 35, sell the middle band |
+| **Stand aside** | Anything else, **and every downtrend** | Nothing — the spot account cannot short |
 
-Price moves cancel, so the book has no directional exposure — net delta sits
-within a few basis points of zero. What remains is:
+The signal uses only completed bars. A breakout that has already run more than
+0.75 ATR past the old high is a chase and is skipped, which is what keeps the
+stop close enough for the reward that is left.
 
-1. **funding** paid by the perp every hour to the short when the rate is positive,
-2. **basis** — the perp premium over its index, plus any gap between the two venues,
-3. **fees** — Alpaca's real crypto fee on the spot leg, 0.045% Hyperliquid taker on the perp.
+## The learner
 
-Realised equity reconciles to those three components exactly; the dashboard
-shows the split rather than a single opaque number.
+Each close files the trade under four nested buckets, most specific first:
 
-### The long leg is broker truth
+```
+trend|BTC|adx=24-32|vol=0.8-1.5
+trend|BTC
+trend|adx=24-32|vol=0.8-1.5
+trend
+```
 
-Every entry submits a market buy and waits for the fill. The pair is then sized
-from **Alpaca's position**, not from the request: Alpaca charges its 25 bps
-crypto fee in coin, so the quantity that lands is 0.25% smaller than the order
-reports. Sizing the short off the order would leave the hedge silently short.
-Each position stores the broker's order id and is reconciled against Alpaca's
-positions every cycle; the dashboard shows `alpaca fill: verified` only when the
-quantities match within 0.5%. Cash in the ledger *is* the broker's cash, so the
-long leg can never drift from the account.
+Each bucket stores a decayed count, win count and sum of **net R** (profit
+divided by what the stop risked, after both fees). A candidate is scored against
+the most specific bucket with at least 5 trades, falling back to its parents
+when there is not enough evidence.
 
-Entries also refuse a thin book: the quoted bid/ask must be inside **0.10%**.
-On 2026-10-23 the live quotes were BTC 0.026%, ETH 0.029%, SOL 0.080%, LINK
-0.169%, DOGE 0.29%, LTC 0.54% — a market order pays that spread twice, so a
-0.54% pair would burn 1% of notional to earn ~9% a year.
+| Evidence | Behaviour |
+| --- | --- |
+| < 5 trades | neutral, **1.0×** size — the desk keeps exploring |
+| 5+ trades, positive expectancy | up to **1.4×** size |
+| 5+ trades, expectancy below +0.05R | down to **0.35×** size |
+| 8+ trades, expectancy ≤ 0 | **avoid** — the bucket is refused |
 
-## Why this strategy
+Evidence decays with a 30-day half-life, on read as well as on write, so a
+bucket that stops trading slowly loses its authority instead of freezing. The
+prior is +0.10R with a weight of 6 pseudo-trades: one bad trade cannot block a
+setup, and one lucky trade cannot promote it.
 
-Measured on **730 days of real hourly funding** (17,520 settlements per coin, 12
-coins, Oct 2024 – Oct 2026; `research/fetch_hl.py`). Fees and slippage are
-charged on both legs, entries and exits.
+## Risk
+
+- **0.75% of equity at the stop** for every trade, before the learner multiplier.
+- Stop distance: 3 ATR in trend, 2 ATR in range. Position size is risk ÷ stop
+  distance, capped at **25% of equity** per position and **75%** in total.
+- At most **4** open positions; one per coin; a 60-minute cooldown after a close.
+- Trend exits: 9 ATR target, 4.5 ATR trailing stop, 20-day time stop, or an
+  established downtrend. Range exits: middle band, 2 ATR stop, 6-day time stop,
+  or the range breaking into a trend.
+- Entries pause for the rest of the UTC day after a 3% equity loss. Exits never
+  pause.
+- A spot spread above **0.15%** blocks an entry, and a quote older than five
+  minutes cannot be traded against.
+
+## What the replay says
+
+The same regime, signals, stops, exits and fees, replayed over the last **120
+days of real Alpaca 4h bars** across the 12-coin universe:
 
 | Measure | Result |
-|---|---|
-| Median funding paid to the short | **10.95% APR** on every coin |
-| Holding one hedged pair for two years | **+7.2% to +9.9% annualised** on capital, max drawdown 0.05–0.7% |
-| Walk-forward (rank on trailing 180d, hold 90d) | **+5.3% annualised**, 0.74% max DD, Sharpe 4.4 |
-| Benchmark, hold BTC + ETH only | **+6.0% annualised**, 0.17% max DD |
-| Deployed basket replay (LINK, BTC, ETH) | **+6.8% annualised**, 0.29% max DD |
+| --- | --- |
+| Trades | **28** (≈ 1.6/week) |
+| Win rate | **46%** |
+| Average net R | **+0.53R** |
+| Return on equity | **+11.48%** over 120 days |
+| Max drawdown | **4.53%** |
+| Fees modelled | 0.25% per side + 0.05% slippage per side |
+| Trend gear | 26 trades, 46% win, +0.53R |
+| Range gear | 2 trades, 50% win, +0.47R |
 
-Two findings shaped the live rules:
+Two honest caveats. The window is a single 120-day sample, and the thresholds
+above were chosen on it, so **this is an in-sample calibration, not a
+walk-forward result** — treat +11% as an upper bound, not a forecast. And the
+range gear barely traded in this sample; its numbers are two trades, not
+evidence of an edge.
 
-- **The edge is structural, not tactical.** Hyperliquid's funding formula carries
-  a 0.01%-per-8h interest floor, which is why the median is exactly 10.95% APR.
-  Sharpe is high because the return is nearly a coupon, not a trend.
-- **Rotating into whatever pays most destroys the edge.** Entering when trailing
-  funding exceeded 15% APR and rebalancing daily produced **−8% annualised with
-  45% of notional paid in fees**. Any book that rebalances more than about 25
-  times a year goes net-negative; the live book therefore holds a fixed basket
-  and leaves only when funding turns against it.
+The learner is not in the replay: the live desk starts neutral and only earns
+its multipliers from its own closed trades.
 
-## Live configuration
+## What is real
 
-| Setting | Value |
-|---|---|
-| Basket | LINK, BTC, ETH (`DN_UNIVERSE`) |
-| Slots / sizing | 3 slots, 60% of equity notional, 20% per pair (`DN_SLOTS`, `DN_NOTIONAL_PCT`) |
-| Short margin | 25% of notional (4×), liquidation near a 25% adverse move |
-| Enter | trailing 7d funding above **+2% APR**, perp premium below **2%** and above **−0.25%**, venue gap inside **1%**, Alpaca spot spread under **0.10%** |
-| Exit | trailing 72h funding below **−3% APR**, or perp premium beyond **2%** |
-| Cadence | re-mark every 5 minutes; funding settles hourly against realised rates |
-| Daily stop | entries pause for the UTC day beyond a 3% equity loss; exits keep running |
+Every buy and sell is a market order on Alpaca's paper account, submitted and
+polled to a terminal fill. Positions are sized from the broker's own quantity
+(a buy of notional `N` receives `N − 0.25%` of coin), and every cycle compares
+the ledger against `GET /v2/positions`. Equity is Alpaca's equity; cash is
+Alpaca's cash; P&L is net of the fees actually charged. Positions worth less
+than a dollar are treated as dust, not as positions.
 
-## Honest limitations
-
-- **Alpaca cannot short crypto.** Its documented crypto API is spot-only and
-  marks pairs `shortable: false`; there are no crypto perpetuals or borrow. The
-  long leg is a real paper order on the account; the short leg is a **ledger
-  position**, marked at Hyperliquid's real mark and settled on Hyperliquid's
-  real funding. Nothing is deposited on a derivatives venue, so the short leg's
-  P&L and the collected funding are measured, not earned.
-- **Funding can turn.** In the sample, 6–33% of hours paid the short nothing or
-  charged it, and 30-day funding went as low as −30% APR on the weakest coins.
-  The exit rule limits the damage but cannot prevent a settlement gap.
-- **The short leg can be liquidated.** At 4× leverage a 25% rally exhausts the
-  margin even though the spot leg gains elsewhere; the two legs sit in different
-  venues and cannot net margin.
-- **Basis is not free.** Cross-venue gaps of 0.1–0.8% appear regularly, usually
-  because Alpaca's thinner pairs print rarely. Prices older than five minutes
-  are marked on Hyperliquid's index and labelled as such.
-- **Paper only.** The build refuses to start unless `ALPACA_PAPER=true`, and
-  nothing here has been validated with real money.
+Alpaca cannot short crypto or trade perpetuals, so the desk is **long-only** and
+stands aside in downtrends. There is no leverage, no live-money path, and the
+client refuses to start unless `ALPACA_PAPER=true`.
 
 ## Files
 
-- `engine.py` — carry loop: marks both legs, settles funding, opens/closes pairs.
-- `hl_client.py` — read-only Hyperliquid data (funding, premium, marks).
-- `alpaca_client.py` — paper Alpaca client plus latest-price freshness checks.
-- `strategy.py` — trailing-funding, premium and basis rules.
-- `state.py` — SQLite ledger: positions, funding events, equity marks, decisions.
-- `app.py` — authenticated dashboard and control endpoints.
-- `templates/`, `static/` — dashboard UI.
-- `research/` — data fetch, carry study, walk-forward, summary generator.
-- `test_engine.py` — accounting test: broker-filled entries, fee-in-coin sizing,
-  funding accrual, delta neutrality, exit path, spread gate.
-- `migrate_broker_truth.py` — one-off rewrite of open pairs from broker positions.
+- `regime.py` — 4h aggregation, ATR/ADX/RSI/Bollinger/Donchian/efficiency, gear
+  classifier.
+- `gears.py` — the breakout and band-fade signals with their stops and targets.
+- `learning.py` — decayed bucket statistics, the sizing multiplier and the
+  avoid gate.
+- `engine.py` — the loop: analyse, manage exits, size and submit entries,
+  reconcile against the broker, record marks.
+- `state.py` — SQLite: trades, equity marks, decisions, events, learned buckets.
+- `alpaca_client.py` — paper Alpaca REST client, paged bars, fill polling,
+  truncating quantity formatting.
+- `app.py`, `templates/`, `static/` — authenticated dashboard.
+- `test_engine.py` — regime classification, signal geometry, learner avoidance
+  and decay, broker-backed entry, stop exit, fee accounting and spread gate.
+- `research/gears_bt.py` — the replay and threshold grid that produced the table
+  above (`gear_summary.json` feeds the dashboard panel).
+- `scripts/retire_carry.py` — the one-off used to liquidate the retired
+  delta-neutral book and set the new baseline.
 
-## Local setup
+## Run it
 
-`cp .env.example .env`, add paper Alpaca keys and dashboard credentials, then
-`chmod 600 .env`. Install `requirements.txt` in a virtual environment and run
-`gunicorn --workers 1 --threads 4 --bind 127.0.0.1:8080 app:app`. The dashboard
-binds to localhost unless TLS certificates are configured; reach it through an
-SSH tunnel (`ssh -N -L 8099:127.0.0.1:8080 user@host`).
+```bash
+cp .env.example .env      # paper keys + dashboard credentials, then chmod 600
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+python test_engine.py
+gunicorn --workers 1 --threads 4 --bind 127.0.0.1:8080 app:app
+```
 
-Run `python test_engine.py` for the accounting check, and
-`cd research && python make_summary.py` to regenerate the dashboard's research
-panel from the stored funding history (`hl_funding.json.gz`).
+The dashboard binds to localhost. Reach it through an SSH tunnel; do not expose
+it without TLS. `ARES_STATE_PATH` points at the SQLite file.
 
-## Deployment
+On the Pi the service is `ares-bot.service` (gunicorn, state in
+`/var/lib/ares/ares_state.sqlite3`). Without root, reload code with
+`kill -HUP $(systemctl show ares-bot -p MainPID --value)`; gunicorn re-forks the
+worker, which re-imports the app and starts a fresh engine thread.
 
-Running on the Pi as `ares-bot.service` (gunicorn, state at
-`/var/lib/ares/ares_state.sqlite3`). Because the unit is a system service, a code
-change needs either `sudo systemctl restart ares-bot` or, without root,
-`kill -HUP $(systemctl show ares-bot -p MainPID --value)` — gunicorn re-forks its
-worker, which re-imports the app and starts a fresh engine thread against the
-same state file. The `HUP` path is what the last deploy used.
+To regenerate the replay panel:
 
-Ledger state is not reset by a reload: pairs, funding events and marks survive.
-After any change to how positions are sized, run `migrate_broker_truth.py` once
-to rewrite open pairs from Alpaca's positions.
+```bash
+.venv/bin/python research/gears_bt.py --days 120
+.venv/bin/python research/gears_bt.py --days 120 --grid   # sensitivity
+```
 
-Rotate the dashboard password and Alpaca keys that have appeared in chat.
+## Known limits
+
+- **In-sample replay.** 120 days, one parameter set chosen on that window. No
+  walk-forward yet; the live learner is the out-of-sample test.
+- **Fees are the main enemy.** 0.50% round trip means a 3 ATR stop is roughly
+  0.17R of cost. Tighter stops or more frequent trading turn the edge negative.
+- **The learner needs samples.** Until a bucket has 5 closed trades it trades at
+  1.0×; until 8 it cannot refuse anything. Early behaviour is the raw rules.
+- **Spot-only.** Downtrends are stood aside, not shorted. A market that only
+  falls produces no trades.
+- **Gap risk.** Stops are checked every five minutes and sell at market, so a
+  violent move can fill well through the stop.
+- **Paper only.** Nothing here has been validated with real money, and the
+  dashboard is protected by a single HTTP Basic credential.

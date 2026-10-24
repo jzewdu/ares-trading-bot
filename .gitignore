@@ -4,3 +4,4 @@ __pycache__/
 *.sqlite3
 logs/
 .venv/
+gear_summary.json

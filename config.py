@@ -1,4 +1,4 @@
-"""Configuration for the paper-first Ares bot."""
+"""Configuration for the paper-first Ares gear-shift bot."""
 from __future__ import annotations
 
 import os
@@ -62,25 +62,45 @@ class Settings:
     ui_user: str = os.getenv("ARES_UI_USER", "")
     ui_password: str = os.getenv("ARES_UI_PASSWORD", "")
 
-    # Delta-neutral carry book. The spot leg is priced on Alpaca, where the
-    # long side would live; the short leg is priced on Hyperliquid, the venue
-    # whose funding the strategy harvests.
-    dn_universe: tuple[str, ...] = _symbols("DN_UNIVERSE", ("LINK", "BTC", "ETH"))
-    dn_slots: int = _int("DN_SLOTS", 3)
-    dn_notional_pct: float = _float("DN_NOTIONAL_PCT", 0.60)
-    dn_margin_pct: float = _float("DN_MARGIN_PCT", 0.25)
-    # Enter while a perp is paying shorts, leave if it starts charging them.
-    dn_enter_apr: float = _float("DN_ENTER_APR", 2.0)
-    dn_exit_apr: float = _float("DN_EXIT_APR", -3.0)
-    dn_max_premium: float = _float("DN_MAX_PREMIUM", 0.02)
-    # Alpaca's quoted bid/ask on the spot pair. BTC/ETH quote near 0.03%, LINK
-    # 0.17%, LTC 0.54% — a market order pays that spread twice, so entries are
-    # refused above 0.10%.
-    dn_max_spread: float = _float("DN_MAX_SPREAD", 0.0010)
-    dn_rebalance_drift: float = _float("DN_REBALANCE_DRIFT", 0.05)
-    dn_start_equity: float = _float("DN_START_EQUITY", 0.0)
+    # Long-only spot universe: Alpaca cannot short crypto, so the desk only
+    # takes longs and stands aside in downtrends.
+    universe: tuple[str, ...] = _symbols("UNIVERSE", (
+        "BTC", "ETH", "SOL", "LINK", "AVAX", "XRP",
+        "ADA", "DOT", "LTC", "BCH", "UNI", "AAVE",
+    ))
+    bars_days: int = _int("BARS_DAYS", 90)
 
+    # Regime thresholds, measured on closed 4h bars.
+    trend_adx: float = _float("TREND_ADX", 25.0)
+    trend_er: float = _float("TREND_ER", 0.30)
+    trend_spread_pct: float = _float("TREND_SPREAD_PCT", 0.35)
+    range_adx: float = _float("RANGE_ADX", 22.0)
+    range_er: float = _float("RANGE_ER", 0.22)
+    range_min_width: float = _float("RANGE_MIN_WIDTH", 1.5)
+
+    # Risk. Risk per trade is the distance to the stop, in equity terms.
+    risk_pct: float = _float("RISK_PCT", 0.0075)
+    max_positions: int = _int("MAX_POSITIONS", 4)
+    max_position_pct: float = _float("MAX_POSITION_PCT", 0.25)
+    max_exposure_pct: float = _float("MAX_EXPOSURE_PCT", 0.75)
+    min_notional: float = _float("MIN_NOTIONAL", 25.0)
+    max_spread: float = _float("MAX_SPREAD", 0.0015)
+    cooldown_minutes: int = _int("ENTRY_COOLDOWN_MIN", 60)
     max_daily_loss_pct: float = _float("MAX_DAILY_LOSS_PCT", 0.03)
+
+    # Exits.
+    trail_atr: float = _float("TRAIL_ATR", 4.5)
+    trend_stop_atr: float = _float("TREND_STOP_ATR", 3.0)
+    trend_target_atr: float = _float("TREND_TARGET_ATR", 9.0)
+    trend_max_days: float = _float("TREND_MAX_DAYS", 20.0)
+    range_stop_atr: float = _float("RANGE_STOP_ATR", 2.0)
+    range_max_days: float = _float("RANGE_MAX_DAYS", 6.0)
+    range_rsi: float = _float("RANGE_RSI", 35.0)
+    # Where a range fade takes profit: the middle band is the high-probability
+    # exit, the upper band pays more but needs a stronger move.
+    range_target: str = os.getenv("RANGE_TARGET", "mid").strip().lower()
+
+    start_equity: float = _float("START_EQUITY", 0.0)
     poll_seconds: int = _int("POLL_SECONDS", 300)
     state_path: str = os.getenv("ARES_STATE_PATH", "ares_state.sqlite3")
     bind_host: str = os.getenv("ARES_BIND", "127.0.0.1")

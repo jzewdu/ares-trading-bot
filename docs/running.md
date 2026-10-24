@@ -1,9 +1,10 @@
 # Running ARES
 
-> **Superseded 2026-10-23.** The service, unit and state path described here are
-> unchanged, but the engine now runs the delta-neutral carry book in the
-> [README](../README.md). `systemctl restart ares-bot` still needs root; without
-> it, reload with `kill -HUP $(systemctl show ares-bot -p MainPID --value)`.
+> **Updated 2026-10-24.** The service, unit and state path described here are
+> unchanged, but the engine now runs the gear-shift desk in the
+> [README](../README.md). `.env.example` is the canonical list of settings.
+> `systemctl restart ares-bot` still needs root; without it, reload with
+> `kill -HUP $(systemctl show ares-bot -p MainPID --value)`.
 
 ARES is one Python process plus gunicorn, serving a localhost dashboard, on a
 **Raspberry Pi 3 Model A+**. It is paper-trading only.
@@ -26,7 +27,16 @@ chmod 600 .env
 | `ARES_BIND` | bind address, default `127.0.0.1` |
 | `ARES_TLS_CERT` / `ARES_TLS_KEY` | set both to bind beyond localhost over HTTPS |
 | `ARES_STATE_PATH` | SQLite file, default `ares_state.sqlite3` |
-| `MAX_PAIRS`, `MAX_POSITIONS`, `MAX_POSITION_PCT`, `MAX_TOTAL_EXPOSURE_PCT`, `MAX_DAILY_LOSS_PCT`, `POLL_SECONDS` | risk and cadence caps |
+| `UNIVERSE` | comma-separated coins, default 12 liquid USD pairs |
+| `TREND_ADX`, `TREND_ER`, `RANGE_ADX`, `RANGE_ER`, `RANGE_MIN_WIDTH` | gear thresholds |
+| `RISK_PCT`, `MAX_POSITIONS`, `MAX_POSITION_PCT`, `MAX_EXPOSURE_PCT`, `MAX_SPREAD`, `MAX_DAILY_LOSS_PCT` | risk, sizing and cost gates |
+| `TREND_STOP_ATR`, `TREND_TARGET_ATR`, `TRAIL_ATR`, `RANGE_STOP_ATR`, `RANGE_TARGET` | exits |
+| `POLL_SECONDS` | cycle cadence, default 300 |
+
+`MAX_POSITIONS` and `MAX_POSITION_PCT` are shared names from an earlier build.
+If an old `.env` still says `MAX_POSITION_PCT=0.015`, every position is capped
+at 1.5% of equity and the desk will look almost idle; the gear-shift values are
+`4` and `0.25`.
 
 **The Python code does not read `.env` itself.** `config.py` calls
 `os.getenv()` at import, so under systemd the variables arrive via
@@ -69,9 +79,9 @@ brings the service back after a crash. It also sandboxes the process
 `/var/lib/ares` the only writable path — which is why the state database lives
 there and not next to the code.
 
-Note that restarting the *process* does not resume *trading*: `paused` lives in
-SQLite and starts as `1`. After any restart, open the dashboard and press
-**Resume paper trading** once you have checked the account.
+`paused` lives in SQLite. A fresh database starts unpaused; an existing one
+keeps whatever the dashboard last set. Pausing blocks entries only — open
+positions are still managed and closed.
 
 ## Reach the dashboard
 

@@ -113,19 +113,38 @@ class AlpacaClient:
             out[symbol] = row
         return out
 
-    def bars(self, symbols: list[str], hours: int = 150) -> dict[str, list[dict]]:
+    def bars(self, symbols: list[str], days: int = 90) -> dict[str, list[dict]]:
+        """Hourly bars back to `days`, following page tokens to the end.
+
+        The regime runs on 4h bars with a 60-period EMA, so it needs far more
+        than one 1000-bar page. Small symbol batches keep each response inside
+        the API's limits and stop one quiet pair from truncating the batch.
+        """
         if not symbols:
             return {}
-        start = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat(timespec="seconds")
+        start = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
         collected: dict[str, list[dict]] = {}
-        for offset in range(0, len(symbols), 5):
-            batch = symbols[offset:offset + 5]
-            raw = self._get(
-                f"{self.data}/v1beta3/crypto/us/bars",
-                {"symbols": ",".join(batch), "timeframe": "1Hour", "start": start, "limit": 1000, "sort": "asc"},
-            )
-            collected.update(raw.get("bars", {}))
-        return collected
+        for offset in range(0, len(symbols), 4):
+            batch = symbols[offset:offset + 4]
+            token: str | None = None
+            seen: set[str] = set()
+            while True:
+                params = {"symbols": ",".join(batch), "timeframe": "1Hour",
+                          "start": start, "limit": 1000, "sort": "asc"}
+                if token:
+                    params["page_token"] = token
+                raw = self._get(f"{self.data}/v1beta3/crypto/us/bars", params)
+                for symbol, rows in (raw.get("bars") or {}).items():
+                    collected.setdefault(symbol, []).extend(rows)
+                token = raw.get("next_page_token")
+                if not token or token in seen:
+                    break
+                seen.add(token)
+        out: dict[str, list[dict]] = {}
+        for symbol, rows in collected.items():
+            by_time = {str(row.get("t")): row for row in rows}
+            out[symbol] = [by_time[key] for key in sorted(by_time)]
+        return out
 
     def order(self, order_id: str) -> dict:
         return self._get(f"{self.base}/v2/orders/{order_id}")
@@ -161,8 +180,15 @@ class AlpacaClient:
 
     @staticmethod
     def qty_string(qty: float) -> str:
-        """Alpaca rejects exponent notation and trailing zeros on crypto qty."""
-        return f"{qty:.8f}".rstrip("0").rstrip(".")
+        """Alpaca rejects exponent notation and trailing zeros on crypto qty.
+
+        Truncate rather than round: formatting 1633.614775495 to 8 decimals
+        rounds up to ...7755, which is more than the account holds and Alpaca
+        answers with a 403 'insufficient balance'. Truncating always sells a
+        quantity the account can actually cover.
+        """
+        truncated = int(max(0.0, qty) * 100_000_000) / 100_000_000
+        return f"{truncated:.8f}".rstrip("0").rstrip(".")
 
     def market_sell(self, symbol: str, qty: str, client_order_id: str) -> dict:
         return self._post(f"{self.base}/v2/orders", {

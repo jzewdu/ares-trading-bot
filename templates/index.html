@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ares · Delta-Neutral Carry</title>
+<title>Ares · Gear Shift</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -13,7 +13,7 @@
   <div class="brand">
     <span class="mark">Λ</span>
     <span class="word">ARES</span>
-    <span class="tag">DELTA-NEUTRAL CARRY</span>
+    <span class="tag">GEAR SHIFT · TREND / RANGE</span>
   </div>
   <div class="top-right">
     <span class="paper">PAPER</span>
@@ -25,40 +25,49 @@
 
 <main>
   <section class="hero">
-    <div class="hero-delta">
-      <div class="label">Net delta</div>
-      <div id="net-delta" class="hero-value">—</div>
-      <div class="delta-gauge" aria-hidden="true">
-        <div class="band"></div>
-        <div class="mid"></div>
-        <div id="delta-marker" class="marker"></div>
+    <div class="hero-gear">
+      <div class="label">Transmission · live regime</div>
+      <div id="gear-name" class="gear-name">—</div>
+      <div id="gear-sub" class="gear-sub">reading the tape…</div>
+      <div class="gear-cells">
+        <div class="gear-cell" id="cell-trend">
+          <span class="g-label">TREND</span>
+          <b id="count-trend">0</b>
+          <i>breakout</i>
+        </div>
+        <div class="gear-cell" id="cell-range">
+          <span class="g-label">RANGE</span>
+          <b id="count-range">0</b>
+          <i>band fade</i>
+        </div>
+        <div class="gear-cell" id="cell-aside">
+          <span class="g-label">ASIDE</span>
+          <b id="count-aside">0</b>
+          <i>no-trade</i>
+        </div>
       </div>
-      <div class="hero-sub">
-        <span>Long spot <b id="delta-long">—</b></span>
-        <span>Short perp <b id="delta-short">—</b></span>
-        <span>tolerance <b>±0.25%</b></span>
-      </div>
+      <div id="gear-rule" class="gear-rule">—</div>
     </div>
     <div class="kpis">
       <div class="kpi">
-        <div class="label">Book equity</div>
+        <div class="label">Equity</div>
         <div id="equity" class="kpi-value">—</div>
-        <div id="equity-delta" class="kpi-sub">since inception</div>
+        <div id="equity-sub" class="kpi-sub">since inception</div>
       </div>
       <div class="kpi accent">
-        <div class="label">Funding collected</div>
-        <div id="funding-total" class="kpi-value">—</div>
-        <div id="funding-today" class="kpi-sub">today —</div>
+        <div class="label">Net P&amp;L</div>
+        <div id="net" class="kpi-value">—</div>
+        <div id="net-sub" class="kpi-sub">realised — · unrealised —</div>
       </div>
       <div class="kpi">
-        <div class="label">Blended carry</div>
-        <div id="carry-apr" class="kpi-value">—</div>
-        <div class="kpi-sub">7d trailing APR · open pairs</div>
+        <div class="label">Open risk</div>
+        <div id="open-risk" class="kpi-value">—</div>
+        <div id="risk-sub" class="kpi-sub">at stops · exposure —</div>
       </div>
       <div class="kpi">
-        <div class="label">Short margin</div>
-        <div id="margin-used" class="kpi-value">—</div>
-        <div id="leverage" class="kpi-sub">—</div>
+        <div class="label">Learned edge</div>
+        <div id="edge" class="kpi-value">—</div>
+        <div id="edge-sub" class="kpi-sub">win rate — over — trades</div>
       </div>
     </div>
   </section>
@@ -66,12 +75,12 @@
   <section class="panel chart-panel">
     <div class="panel-head">
       <div>
-        <h2>Book equity &amp; funding</h2>
+        <h2>Equity</h2>
         <p id="chart-note" class="muted">collecting marks…</p>
       </div>
       <div class="legend">
         <span class="lg equity">equity</span>
-        <span class="lg funding">cumulative funding</span>
+        <span class="lg start">launch baseline</span>
       </div>
     </div>
     <div class="chart-wrap">
@@ -82,8 +91,8 @@
 
   <section class="book-section">
     <div class="section-head">
-      <h2>Carry book <span id="book-count" class="chip">0 / 3</span></h2>
-      <p class="muted">equal notional both legs · market risk cancels · funding is the return</p>
+      <h2>Open positions <span id="book-count" class="chip">0 / 4</span></h2>
+      <p class="muted">every entry submits a real Alpaca order · sized to <b id="risk-pct">0.75%</b> of equity at its stop</p>
     </div>
     <div id="book" class="book"></div>
   </section>
@@ -92,73 +101,68 @@
     <div class="panel">
       <div class="panel-head">
         <div>
-          <h2>Funding engine</h2>
-          <p class="muted">live Hyperliquid funding and basis vs Alpaca spot</p>
+          <h2>Learned edges</h2>
+          <p id="learner-note" class="muted">every closed trade files itself into a bucket</p>
         </div>
+        <div id="learner-stats" class="learner-stats"></div>
       </div>
       <div class="table-wrap">
-        <table class="grid" id="universe-table">
+        <table class="grid" id="learner-table">
           <thead>
-            <tr><th>pair</th><th>funding APR</th><th>perp premium</th><th>venue gap</th><th>spot</th><th>perp</th><th>book</th></tr>
+            <tr><th>bucket</th><th>n</th><th>win</th><th>exp. R</th><th>stance</th><th>size</th></tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
+      <p class="learner-legend">A bucket is <b>avoided</b> once 8 trades show negative expectancy; winners get up to <b>1.4×</b> size, losers down to <b>0.35×</b>. Evidence decays with a 30-day half-life.</p>
     </div>
     <div class="panel">
       <div class="panel-head">
         <div>
-          <h2>Funding settlements</h2>
-          <p class="muted">paid hourly on the short leg</p>
+          <h2>Trade journal</h2>
+          <p class="muted">net R of the stop, after Alpaca's 0.25% per side</p>
         </div>
       </div>
-      <div id="funding-tape" class="tape"></div>
+      <div id="journal" class="journal"></div>
     </div>
   </section>
 
-  <section class="panel research">
+  <section class="panel">
     <div class="panel-head">
       <div>
-        <h2>Research — <span id="research-window">730 days</span></h2>
-        <p class="muted" id="research-hours">hourly funding, real fees, walk-forward selection</p>
+        <h2>Regime scan · 4h bars</h2>
+        <p class="muted">ADX and Kaufman efficiency decide the gear; the setup decides the trade</p>
+      </div>
+      <div class="legend">
+        <span class="lg trend">trend</span>
+        <span class="lg range">range</span>
+        <span class="lg aside">stand aside</span>
       </div>
     </div>
-    <div class="research-grid">
-      <div class="stat">
-        <div class="label">Deployed book, 2y replay</div>
-        <div id="replay-ann" class="stat-value">—</div>
-        <div id="replay-meta" class="stat-sub">—</div>
-      </div>
-      <div class="stat">
-        <div class="label">Walk-forward, top 3 by trailing funding</div>
-        <div id="wf-ann" class="stat-value">—</div>
-        <div id="wf-meta" class="stat-sub">—</div>
-      </div>
-      <div class="stat">
-        <div class="label">Benchmark, hold BTC + ETH</div>
-        <div id="bench-ann" class="stat-value">—</div>
-        <div id="bench-meta" class="stat-sub">—</div>
-      </div>
-      <div class="stat">
-        <div class="label">Fees modelled</div>
-        <div id="fees" class="stat-value">—</div>
-        <div class="stat-sub">spot taker + perp taker, per round trip</div>
+    <div class="table-wrap">
+      <table class="grid" id="universe-table">
+        <thead>
+          <tr><th>pair</th><th>gear</th><th>ADX</th><th>efficiency</th><th>ATR%</th><th>RSI</th><th>price</th><th>spread</th><th>score</th><th>action</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" id="backtest-panel" hidden>
+    <div class="panel-head">
+      <div>
+        <h2>Replay · <span id="bt-window">—</span></h2>
+        <p class="muted" id="bt-note">the same regime, signals, stops and fees, run over stored 4h bars</p>
       </div>
     </div>
-    <div class="research-body">
-      <div class="chart-wrap replay-wrap">
-        <canvas id="replay-chart"></canvas>
-      </div>
-      <div class="table-wrap">
-        <table class="grid compact" id="research-table">
-          <thead>
-            <tr><th>coin</th><th>mean APR</th><th>hours paid</th><th>2y net</th><th>annualised</th><th>max DD</th><th>neg 7d spells</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
+    <div class="research-grid" id="bt-stats"></div>
+    <div class="table-wrap">
+      <table class="grid compact" id="bt-table">
+        <thead><tr><th>gear</th><th>trades</th><th>win</th><th>avg R</th><th>net</th></tr></thead>
+        <tbody></tbody>
+      </table>
     </div>
-    <p id="conclusion" class="conclusion"></p>
   </section>
 
   <section class="split">
@@ -166,7 +170,7 @@
       <div class="panel-head">
         <div>
           <h2>Decision stream</h2>
-          <p class="muted">why the book holds, adds or leaves</p>
+          <p class="muted">why a gear fired, passed or was refused</p>
         </div>
       </div>
       <div id="decisions" class="stream"></div>
@@ -175,7 +179,7 @@
       <div class="panel-head">
         <div>
           <h2>System log</h2>
-          <p class="muted">engine, funding and data events</p>
+          <p class="muted">orders, exits and learned lessons</p>
         </div>
       </div>
       <div id="events" class="stream"></div>
@@ -183,18 +187,24 @@
   </section>
 
   <footer class="foot">
-    <p><b>How this works.</b> Each pair is long spot on Alpaca and short the same notional on a Hyperliquid perpetual.
-      Price moves cancel; the short collects funding every hour, and the book pays fees on both legs.
-      It leaves a pair when funding turns negative or the basis blows past 2%.</p>
-    <p><b>What is real here.</b> The long spot leg is a live order on the Alpaca paper account — filled, sized from the
-      broker's own fill, and reconciled against the broker's positions every cycle. Perp marks, premiums and funding
-      settlements come from Hyperliquid's public feed. Alpaca cannot short crypto and this build holds no perpetuals
-      account, so only the short leg is a ledger position.</p>
+    <p><b>How it trades.</b> Each cycle rebuilds closed 4h bars. ADX above 22 with efficiency above 0.30
+      selects the <b>trend</b> gear and buys a fresh break of the 20-bar high, trailing 3 ATR.
+      ADX below 18 with efficiency below 0.22 selects the <b>range</b> gear, buys the lower Bollinger band
+      and sells the middle. Anything else — including downtrends, because the account cannot short — is
+      <b>stand aside</b>. Stops are 2 ATR in trend and 1.5 ATR in range; positions are sized so the stop
+      costs 0.75% of equity before the learner's multiplier.</p>
+    <p><b>What is real.</b> Every entry and exit is a market order on the Alpaca paper account, filled and
+      reconciled against the broker's positions. Equity is Alpaca's own equity; P&amp;L is net of the fees
+      actually charged (0.25% per side, taken in coin on buys). The learner only exists in this account's
+      closed trades — with fewer than 5 trades in a bucket it stays neutral, and it needs 8 before it will
+      refuse a setup. All results remain paper until the account is funded and the build is pointed at it.</p>
   </footer>
 </main>
 
 <script>
 const $ = (id) => document.getElementById(id);
+const ESC = {"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"};
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ESC[c]);
 
 const money = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v))
   ? "—" : (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d});
@@ -210,14 +220,21 @@ const price = (v) => {
 const time = (iso) => {
   if (!iso) return "—";
   const d = new Date(iso);
-  return d.toISOString().slice(11, 19);
+  return Number.isNaN(d.getTime()) ? "—" : d.toISOString().slice(11, 19);
 };
-const clock = () => {
-  $("clock").textContent = new Date().toISOString().slice(11, 19) + " UTC";
+const stamp = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : d.toISOString().slice(5, 16).replace("T", " ");
 };
+const clock = () => { $("clock").textContent = new Date().toISOString().slice(11, 19) + " UTC"; };
 clock(); setInterval(clock, 1000);
 
-function drawSeries(canvas, series, opts) {
+const GEAR_LABEL = {trend: "TREND", range: "RANGE", stand_aside: "STAND ASIDE"};
+const GEAR_CLASS = {trend: "trend", range: "range", stand_aside: "aside"};
+const badge = (gear) => `<span class="gbadge ${GEAR_CLASS[gear] || "aside"}">${esc(GEAR_LABEL[gear] || gear)}</span>`;
+
+function drawSeries(canvas, series) {
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   const w = Math.max(320, rect.width), h = Math.max(120, rect.height);
@@ -234,66 +251,66 @@ function drawSeries(canvas, series, opts) {
   min -= span * 0.08; max += span * 0.08;
   const x = (i, n) => pad.l + (w - pad.l - pad.r) * (n <= 1 ? 0.5 : i / (n - 1));
   const y = (v) => pad.t + (h - pad.t - pad.b) * (1 - (v - min) / (max - min));
-
   ctx.strokeStyle = "rgba(120,140,170,0.10)";
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
     const gy = pad.t + (h - pad.t - pad.b) * (i / 4);
     ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(w - pad.r, gy); ctx.stroke();
   }
-
   series.forEach((s) => {
     const n = s.values.length;
     if (!n) return;
     ctx.beginPath();
-    s.values.forEach((v, i) => {
-      const px = x(i, n), py = y(v);
-      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-    });
+    s.values.forEach((v, i) => { const px = x(i, n), py = y(v); i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); });
     if (s.fill) {
-      ctx.lineTo(x(n - 1, n), h - pad.b);
-      ctx.lineTo(x(0, n), h - pad.b);
-      ctx.closePath();
+      ctx.lineTo(x(n - 1, n), h - pad.b); ctx.lineTo(x(0, n), h - pad.b); ctx.closePath();
       const grad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
-      grad.addColorStop(0, s.fill);
-      grad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = grad;
-      ctx.fill();
+      grad.addColorStop(0, s.fill); grad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = grad; ctx.fill();
       ctx.beginPath();
-      s.values.forEach((v, i) => {
-        const px = x(i, n), py = y(v);
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-      });
+      s.values.forEach((v, i) => { const px = x(i, n), py = y(v); i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); });
     }
-    ctx.strokeStyle = s.color;
-    ctx.lineWidth = s.width || 1.8;
-    ctx.lineJoin = "round";
+    ctx.strokeStyle = s.color; ctx.lineWidth = s.width || 1.8; ctx.lineJoin = "round";
+    if (s.dash) ctx.setLineDash([4, 4]); else ctx.setLineDash([]);
     ctx.stroke();
+    ctx.setLineDash([]);
   });
 }
 
 function renderHero(state) {
-  const d = state.net_delta_pct || 0;
-  $("net-delta").textContent = (d >= 0 ? "+" : "") + d.toFixed(3) + "%";
-  $("net-delta").className = "hero-value " + (Math.abs(d) < 0.25 ? "good" : Math.abs(d) < 1 ? "warn" : "bad");
-  const marker = $("delta-marker");
-  const pos = Math.max(-1, Math.min(1, d / 1.0));
-  marker.style.left = `calc(${50 + pos * 48}% - 5px)`;
-  $("delta-long").textContent = money(state.gross_notional / 2, 0);
-  $("delta-short").textContent = money(state.gross_notional / 2, 0);
+  const gear = state.gear || "stand_aside";
+  const name = $("gear-name");
+  name.textContent = GEAR_LABEL[gear] || "—";
+  name.className = "gear-name " + (GEAR_CLASS[gear] || "aside");
+  const counts = state.gear_counts || {};
+  const total = (state.universe || []).length || 1;
+  $("count-trend").textContent = counts.trend || 0;
+  $("count-range").textContent = counts.range || 0;
+  $("count-aside").textContent = counts.stand_aside || 0;
+  ["trend", "range", "aside"].forEach((g) => $("cell-" + g).classList.remove("active"));
+  $("cell-" + (GEAR_CLASS[gear] || "aside")).classList.add("active");
+  $("gear-sub").textContent = `${counts.trend || 0} trending · ${counts.range || 0} ranging · ${counts.stand_aside || 0} no-trade of ${total} coins`;
+  $("gear-rule").textContent = state.paused
+    ? "Entries paused — open positions are still managed and closed."
+    : (gear === "trend" ? "Momentum gear: buying fresh 20-bar breakouts, trailing 3 ATR."
+      : gear === "range" ? "Mean-reversion gear: fading the lower band back to the middle."
+      : "No clean regime — the desk sits in cash rather than force a trade.");
 
   $("equity").textContent = money(state.equity, 2);
-  const change = (state.equity || 0) - (state.start_equity || 0);
-  const pctChange = state.start_equity ? change / state.start_equity * 100 : 0;
-  $("equity-delta").textContent = `${signed(change)} (${pct(pctChange, 3)}) since inception`
-    + (state.broker_equity ? ` · Alpaca ${money(state.broker_equity, 2)}` : "");
-  $("equity-delta").className = "kpi-sub " + (change >= 0 ? "good" : "bad");
+  const net = state.net || 0;
+  $("equity-sub").textContent = `since ${money(state.start_equity, 0)} launch · cash ${money(state.cash, 0)}`;
+  $("net").textContent = (net >= 0 ? "+" : "") + money(net, 2);
+  $("net").className = "kpi-value " + (net >= 0 ? "good" : "bad");
+  $("net-sub").textContent = `realised ${money(state.realized, 2)} · unrealised ${money(state.unrealized, 2)} · fees ${money(state.fees, 2)}`;
 
-  $("funding-total").textContent = money(state.funding_total || 0, 2);
-  $("funding-today").textContent = `today ${money(state.funding_today || 0, 2)}`;
-  $("carry-apr").textContent = pct(state.carry_apr || 0, 2);
-  $("margin-used").textContent = money(state.margin_used || 0, 0);
-  $("leverage").textContent = `${(state.leverage || 4).toFixed(0)}x short · liquidation ≈ ${((1 / (state.leverage || 4)) * 100).toFixed(0)}% move`;
+  $("open-risk").textContent = money(state.open_risk || 0, 2);
+  $("risk-sub").textContent = `${state.open_count || 0}/${state.max_positions || 4} slots · exposure ${pct(state.exposure_pct || 0, 1)}`;
+  $("risk-pct").textContent = (state.risk_pct || 0.75).toFixed(2) + "%";
+
+  const learn = state.learner || {};
+  $("edge").textContent = learn.trades ? signed(learn.avg_r, 2) + "R" : "—";
+  $("edge").className = "kpi-value " + (!learn.trades ? "" : learn.avg_r >= 0 ? "good" : "bad");
+  $("edge-sub").textContent = `${(learn.win_pct || 0).toFixed(0)}% win · ${learn.trades || 0} closed trades`;
 
   const pill = $("status-pill");
   pill.textContent = state.paused ? "PAUSED" : (state.last_error ? "DEGRADED" : "LIVE");
@@ -303,17 +320,17 @@ function renderHero(state) {
 }
 
 function renderChart(state) {
-  const marks = state.all_marks || [];
+  const marks = state.marks || [];
   const note = $("chart-note");
   if (marks.length < 2) {
     note.textContent = "first marks recorded — the curve fills in as the engine cycles";
     return;
   }
   const eq = marks.map((m) => m.equity);
-  const fund = marks.map((m) => (state.start_equity || 0) + (m.funding_cum || 0));
+  const base = marks.map(() => state.start_equity || eq[0]);
   drawSeries($("equity-chart"), [
-    {values: fund, color: "rgba(61,220,151,0.55)", fill: "rgba(61,220,151,0.18)", width: 1.4},
-    {values: eq, color: "#6ea8fe", width: 2.0},
+    {values: base, color: "rgba(124,139,159,0.5)", width: 1.2, dash: true},
+    {values: eq, color: "#6ea8fe", fill: "rgba(110,168,254,0.16)", width: 2.0},
   ]);
   const first = new Date(marks[0].ts), last = new Date(marks[marks.length - 1].ts);
   const hours = Math.max(0.1, (last - first) / 3.6e6);
@@ -321,165 +338,174 @@ function renderChart(state) {
 }
 
 function renderRecon(state) {
-  const fees = state.fees_total || 0;
-  const funding = state.funding_total || 0;
-  const basis = state.basis_total || 0;
-  const net = (state.equity || 0) - (state.start_equity || 0);
+  const net = state.net || 0;
+  const attributed = (state.realized || 0) + (state.unrealized || 0);
   const cell = (label, value, cls) => `<span class="recon-item"><i>${label}</i><b class="${cls}">${value}</b></span>`;
-  $("recon").innerHTML = cell("funding", money(funding, 2), funding >= 0 ? "good" : "bad")
-    + cell("basis + mark", money(basis, 2), basis >= 0 ? "good" : "bad")
-    + cell("fees", "-" + money(fees, 2).replace("$", "$"), "bad")
+  $("recon").innerHTML = cell("realised", money(state.realized, 2), state.realized >= 0 ? "good" : "bad")
+    + cell("unrealised", money(state.unrealized, 2), state.unrealized >= 0 ? "good" : "bad")
+    + cell("fees paid", money(state.fees, 2), "bad")
     + cell("net", money(net, 2), net >= 0 ? "good" : "bad")
-    + cell("reconciled", Math.abs(net - (funding + basis - fees)) < 0.02 ? "exact" : "check", "muted-txt");
+    + cell("attribution", money(attributed, 2), Math.abs(net - attributed) < 1 ? "muted-txt" : "warn")
+    + cell("alpaca", state.broker_error ? "unreachable" : money(state.broker_equity, 0), state.broker_error ? "bad" : "muted-txt");
 }
 
 function renderBook(state) {
   const book = state.book || [];
-  $("book-count").textContent = `${book.length} / ${state.slots || 3}`;
+  $("book-count").textContent = `${book.length} / ${state.max_positions || 4}`;
   const host = $("book");
   if (!book.length) {
     host.innerHTML = `<div class="empty">
-      <div class="empty-title">No hedged pairs open</div>
-      <p>Entries wait for funding above ${(state.config?.enter_apr ?? 2).toFixed(1)}% APR and a basis inside
-      ${((state.config?.max_premium ?? 0.02) * 100).toFixed(1)}%. The engine re-checks every cycle.</p>
+      <div class="empty-title">No position open</div>
+      <p>The desk is waiting for a setup that clears its gear filters, its spread gate and the learner.
+      Every coin it is watching, and the reason it is not in the trade, is in the regime scan below.</p>
     </div>`;
     return;
   }
   host.innerHTML = book.map((p) => {
-    const hedge = p.spot ? (p.perp * 0 + (p.perp_entry ? p.perp : p.perp)) : 0;
-    const ratio = p.spot > 0 ? (p.perp / p.spot) : 1;
-    const drift = Math.abs(ratio - 1) * 100;
-    const premiumMove = (p.premium - p.entry_premium) * 100;
-    const staleSpot = p.spot_source && p.spot_source !== "alpaca";
+    const prog = Math.max(0, Math.min(1, p.progress || 0));
+    const r = p.r_now || 0;
+    const hold = (p.hold_hours || 0) < 48
+      ? `${(p.hold_hours || 0).toFixed(1)}h`
+      : `${((p.hold_hours || 0) / 24).toFixed(1)}d`;
     return `<article class="pos">
       <div class="pos-head">
-        <div class="coin-block"><span class="coin">${p.coin}</span><span class="pair">${p.symbol}</span></div>
-        <div class="pos-money">
-          <span class="notional">${money(p.notional, 0)}</span>
-          <span class="per-pair">per leg</span>
-        </div>
-        <div class="pos-apr">${pct(p.apr7d ?? p.funding_apr, 1)}<span>7d carry · ${pct(p.funding_apr, 1)} now</span></div>
+        <div class="coin-block"><span class="coin">${esc(p.coin)}</span><span class="pair">${esc(p.symbol)}</span></div>
+        <div class="pos-gear">${badge(p.gear)}<span class="setup">${esc(p.setup)}</span></div>
+        <div class="pos-money"><span class="notional">${money(p.notional, 0)}</span><span class="per-pair">notional</span></div>
       </div>
-      <div class="legs">
-        <div class="leg long">
-          <div class="leg-name">LONG SPOT <i>Alpaca</i></div>
-          <div class="leg-row"><span>entry</span><b>${price(p.spot_entry)}</b></div>
-          <div class="leg-row"><span>now</span><b>${price(p.spot)}</b></div>
-          <div class="leg-pnl ${p.pnl_spot >= 0 ? "up" : "down"}">${p.pnl_spot >= 0 ? "+" : ""}${money(p.pnl_spot, 2)}</div>
-        </div>
-        <div class="leg short">
-          <div class="leg-name">SHORT PERP <i>Hyperliquid</i></div>
-          <div class="leg-row"><span>entry</span><b>${price(p.perp_entry)}</b></div>
-          <div class="leg-row"><span>now</span><b>${price(p.perp)}</b></div>
-          <div class="leg-pnl ${p.pnl_perp >= 0 ? "up" : "down"}">${p.pnl_perp >= 0 ? "+" : ""}${money(p.pnl_perp, 2)}</div>
-        </div>
+      <div class="pos-levels">
+        <div class="level"><i>entry</i><b>${price(p.entry)}</b></div>
+        <div class="level"><i>now</i><b>${price(p.price)}</b></div>
+        <div class="level pnl ${p.pnl >= 0 ? "good" : "bad"}"><i>open P&amp;L</i><b>${signed(p.pnl, 2)} · ${signed(r, 2)}R</b></div>
       </div>
-      <div class="hedge">
-        <div class="hedge-label"><span>hedge balance</span><b class="${drift < 0.5 ? "good" : "warn"}">${(ratio * 100).toFixed(2)}%</b></div>
-        <div class="hedge-bar"><div class="hedge-fill" style="width:${Math.min(100, 50 + (ratio - 1) * 500)}%"></div></div>
+      <div class="trade-bar" title="stop ${price(p.stop)} → target ${price(p.target)}">
+        <div class="trade-band"></div>
+        <div class="trade-fill ${p.pnl >= 0 ? "up" : "down"}" style="width:${(prog * 100).toFixed(1)}%"></div>
+        <div class="trade-marker" style="left:${(prog * 100).toFixed(1)}%"></div>
+        <span class="tick stop">stop ${price(p.stop)}</span>
+        <span class="tick target">target ${price(p.target)}</span>
       </div>
       <div class="pos-foot">
-        <span class="foot-stat"><i>funding</i><b class="good">${money(p.funding, 2)}</b></span>
-        <span class="foot-stat"><i>perp premium</i><b>${pct(p.entry_premium * 100, 3)} → ${pct(p.premium * 100, 3)}</b></span>
-        <span class="foot-stat"><i>premium drift</i><b class="${premiumMove <= 0 ? "good" : "bad"}">${pct(premiumMove, 3)}</b></span>
-        <span class="foot-stat"><i>venue gap</i><b class="${Math.abs(p.venue_gap || 0) < 0.005 ? "good" : "warn"}">${pct((p.venue_gap || 0) * 100, 3)}</b></span>
-        <span class="foot-stat"><i>alpaca fill</i><b class="${p.broker_ok ? "good" : "warn"}">${p.broker_ok ? "verified" : "mismatch"}</b></span>
-        <span class="foot-stat"><i>net</i><b class="${p.net >= 0 ? "good" : "bad"}">${money(p.net, 2)}</b></span>
+        <span class="foot-stat"><i>risk at stop</i><b>${money(p.risk_usd, 2)}</b></span>
+        <span class="foot-stat"><i>held</i><b>${hold}</b></span>
+        <span class="foot-stat"><i>high</i><b>${price(p.high)}</b></span>
+        <span class="foot-stat"><i>ADX / eff</i><b>${(p.adx || 0).toFixed(1)} / ${(p.er || 0).toFixed(2)}</b></span>
+        <span class="foot-stat"><i>score</i><b>${(p.score || 0).toFixed(0)}</b></span>
+        <span class="foot-stat"><i>fill</i><b class="good">verified</b></span>
       </div>
-      <div class="pos-rule">opens ${time(p.opened)} UTC${staleSpot ? " · spot marked on Hyperliquid index (thin Alpaca print)" : ""} · exits if funding ≤ ${state.config?.exit_apr?.toFixed?.(1) ?? "-3.0"}% APR or perp premium ≥ ${((state.config?.max_premium ?? 0.02) * 100).toFixed(1)}%</div>
+      <div class="pos-rule">opened ${stamp(p.opened)} UTC · order ${esc((p.order_id || "").slice(0, 8))} · managed every cycle, not only at the 4h close</div>
     </article>`;
   }).join("");
 }
 
+function bucketParts(key) {
+  const parts = String(key || "").split("|");
+  return {
+    gear: (parts[0] || "").replace("gear=", ""),
+    coin: (parts.find((p) => p.startsWith("coin=")) || "").slice(5),
+    adx: (parts.find((p) => p.startsWith("adx=")) || "").slice(4),
+    vol: (parts.find((p) => p.startsWith("vol=")) || "").slice(4),
+  };
+}
+
+function renderLearner(state) {
+  const learn = state.learner || {};
+  $("learner-note").textContent = learn.trades
+    ? `prior ${signed(learn.prior_mean_r, 2)}R · evidence decays with a 30-day half-life`
+    : "every closed trade files itself into a bucket — no trades yet, so sizing stays neutral";
+  $("learner-stats").innerHTML = `<span><i>trades</i><b>${learn.trades || 0}</b></span>
+    <span><i>win</i><b>${(learn.win_pct || 0).toFixed(0)}%</b></span>
+    <span><i>avg R</i><b class="${(learn.avg_r || 0) >= 0 ? "good" : "bad"}">${signed(learn.avg_r || 0, 2)}</b></span>`;
+  const rows = learn.buckets || [];
+  const body = document.querySelector("#learner-table tbody");
+  body.innerHTML = rows.length ? rows.slice(0, 14).map((b) => {
+    const p = bucketParts(b.key);
+    const stance = b.stance || "learning";
+    const mult = stance === "avoid" ? 0 : Math.max(0.35, Math.min(1.4, 0.75 + (b.expectancy || 0) * 2));
+    const label = `${p.coin ? p.coin : "all coins"}${p.adx ? " · ADX " + p.adx : ""}${p.vol ? " · vol " + p.vol + "%" : ""}`;
+    return `<tr>
+      <td>${badge(p.gear)} <span class="tiny inline">${esc(label)}</span></td>
+      <td>${(b.n || 0).toFixed(0)}</td>
+      <td>${(b.win_pct || 0).toFixed(0)}%</td>
+      <td class="${b.expectancy >= 0 ? "good" : "bad"}">${signed(b.expectancy, 2)}</td>
+      <td><span class="stance ${stance}">${stance.replace("_", " ")}</span></td>
+      <td>${mult.toFixed(2)}×</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="6"><span class="muted">No closed trades yet. The learner starts with a +0.10R prior and 1.0× size; it needs 5 trades in a bucket to move size and 8 to refuse one.</span></td></tr>`;
+}
+
+function renderJournal(state) {
+  const rows = state.closed || [];
+  $("journal").innerHTML = rows.length ? rows.map((t) => {
+    const r = t.r_multiple || 0;
+    return `<div class="journal-row">
+      <div class="jr-head">
+        ${badge(t.gear)}
+        <b>${esc(t.coin)}</b>
+        <span class="jr-r ${r >= 0 ? "good" : "bad"}">${signed(r, 2)}R</span>
+        <span class="jr-pnl ${(t.pnl || 0) >= 0 ? "good" : "bad"}">${money(t.pnl, 2)}</span>
+        <span class="jr-when">${(t.hold_hours || 0).toFixed(1)}h · ${stamp(t.closed_ts)}</span>
+      </div>
+      <div class="jr-why">${esc(t.exit_reason || "")}</div>
+      <div class="jr-lesson">${esc((t.lesson || "").slice(0, 170))}</div>
+    </div>`;
+  }).join("") : `<div class="empty small">The first closed trade will appear here with its lesson.</div>`;
+}
+
 function renderUniverse(state) {
   const body = document.querySelector("#universe-table tbody");
-  const reasons = state.reasons || {};
   body.innerHTML = (state.universe || []).map((u) => {
-    const reason = reasons[u.symbol] || "";
-    const stale = u.source && u.source !== "alpaca";
-    return `<tr class="${u.in_book ? "in-book" : ""}">
-      <td><span class="sym">${u.coin}</span><span class="tiny">${u.symbol}</span></td>
-      <td><div class="apr-cell"><b class="${(u.apr7d ?? u.funding_apr) >= 0 ? "good" : "bad"}">${pct(u.apr7d ?? u.funding_apr, 1)}</b>
-        <div class="tiny">${pct(u.funding_apr, 1)} now</div>
-        <div class="apr-bar"><div style="width:${Math.min(100, Math.max(0, (u.apr7d ?? u.funding_apr) / 30 * 100))}%"></div></div></div></td>
-      <td class="${u.premium >= 0 ? "warm" : "cool"}">${pct(u.premium * 100, 3)}</td>
-      <td class="${Math.abs(u.gap || 0) < 0.005 ? "" : "warn"}">${pct((u.gap || 0) * 100, 3)}</td>
-      <td>${price(u.spot)}${stale ? '<span class="tiny warn">HL index</span>' : ''}</td>
-      <td>${price(u.mark)}</td>
-      <td>${u.in_book ? '<span class="dot on"></span>held' : `<span class="dot"></span>${reason ? reason : "idle"}`}</td>
+    const held = u.held;
+    const scoreCls = u.score >= 50 ? "good" : u.score > 0 ? "warn" : "";
+    return `<tr class="${held ? "in-book" : ""}">
+      <td><span class="sym">${esc(u.coin)}</span><span class="tiny">${esc(u.symbol)}</span></td>
+      <td>${badge(u.gear)}${u.direction === "down" ? '<span class="tiny">downtrend</span>' : ""}</td>
+      <td>${(u.adx || 0).toFixed(1)}</td>
+      <td>${(u.er || 0).toFixed(2)}</td>
+      <td>${(u.atr_pct || 0).toFixed(2)}%</td>
+      <td>${(u.rsi || 0).toFixed(0)}</td>
+      <td>${price(u.price)}</td>
+      <td class="${(u.spread || 0) <= (state.config?.max_spread || 0.0015) ? "" : "warn"}">${u.spread == null ? "—" : (u.spread * 100).toFixed(2) + "%"}</td>
+      <td class="${scoreCls}">${u.score ? u.score.toFixed(0) : "—"}</td>
+      <td title="${esc(u.reason)}"><span class="${held ? "good" : ""}">${esc(u.action)}</span><span class="tiny">${esc((u.reason || "").slice(0, 78))}</span></td>
     </tr>`;
   }).join("");
 }
 
-function renderTape(state) {
-  const host = $("funding-tape");
-  const rows = state.funding_events || [];
-  if (!rows.length) {
-    host.innerHTML = `<div class="empty small">No settlements yet — funding is paid on the hour.</div>`;
-    return;
-  }
-  host.innerHTML = rows.map((r) => `<div class="tape-row">
-    <span class="tape-time">${time(r.ts)}</span>
-    <span class="tape-coin">${r.coin}</span>
-    <span class="tape-rate">${(r.rate * 10000).toFixed(3)} bp</span>
-    <span class="tape-amount ${r.amount >= 0 ? "up" : "down"}">${r.amount >= 0 ? "+" : ""}${money(r.amount, 2)}</span>
-  </div>`).join("");
-}
-
-function renderResearch(research) {
-  if (!research || !research.coins) return;
-  $("research-window").textContent = research.window || "730 days";
-  $("research-hours").textContent = `${(research.hours || 0).toLocaleString()} hourly settlements · real fees · walk-forward selection`;
-  const book = research.book_replay || {};
-  $("replay-ann").textContent = pct(book.ann_pct, 2);
-  $("replay-meta").textContent = `${money(book.net_pct, 1).replace("$", "+")} over ${(book.days || 0).toFixed(0)}d · max DD ${(book.dd_pct || 0).toFixed(2)}% · Sharpe ${(book.sharpe || 0).toFixed(1)}`;
-  const wf = research.walkforward || {};
-  $("wf-ann").textContent = pct(wf.ann_pct, 2);
-  $("wf-meta").textContent = `max DD ${(wf.dd_pct || 0).toFixed(2)}% · Sharpe ${(wf.sharpe || 0).toFixed(1)} · fees ${(wf.fees_pct || 0).toFixed(1)}%`;
-  const b = research.benchmark || {};
-  $("bench-ann").textContent = pct(b.ann_pct, 2);
-  $("bench-meta").textContent = `max DD ${(b.dd_pct || 0).toFixed(2)}% · fees ${(b.fees_pct || 0).toFixed(1)}% — selection added little`;
-  const fees = research.fees || {};
-  $("fees").textContent = `${(fees.round_trip_pct || 0).toFixed(2)}%`;
-  $("conclusion").textContent = research.conclusion || "";
-
-  document.querySelector("#research-table tbody").innerHTML = research.coins.map((c) => `
-    <tr>
-      <td><span class="sym">${c.coin}</span></td>
-      <td class="${c.mean_apr >= 0 ? "good" : "bad"}">${pct(c.mean_apr, 1)}</td>
-      <td>${(c.positive_pct || 0).toFixed(0)}%</td>
-      <td class="${c.net >= 0 ? "good" : "bad"}">${pct(c.net, 1)}</td>
-      <td class="${c.ann >= 0 ? "good" : "bad"}">${pct(c.ann, 2)}</td>
-      <td>${(c.dd || 0).toFixed(2)}%</td>
-      <td>${c.neg_spells ?? 0}</td>
-    </tr>`).join("");
-
-  const curve = research.curve || [];
-  if (curve.length > 1) {
-    const base = curve[0][1];
-    drawSeries($("replay-chart"), [{
-      values: curve.map((p) => (p[1] / base - 1) * 100),
-      color: "#3ddc97",
-      fill: "rgba(61,220,151,0.16)",
-      width: 1.8,
-    }]);
-  }
+function renderBacktest(bt) {
+  if (!bt || !bt.trades) return;
+  $("backtest-panel").hidden = false;
+  $("bt-window").textContent = bt.window || "stored history";
+  $("bt-note").textContent = bt.note || "the same regime, signals, stops and fees, replayed on closed 4h bars";
+  const s = (label, value, cls = "") => `<div class="stat"><div class="label">${label}</div><div class="stat-value ${cls}">${value}</div></div>`;
+  $("bt-stats").innerHTML = s("Trades", bt.trades)
+    + s("Win rate", (bt.win_pct || 0).toFixed(0) + "%")
+    + s("Avg net R", signed(bt.avg_r || 0, 2), (bt.avg_r || 0) >= 0 ? "good" : "bad")
+    + s("Total return", pct(bt.total_pct || 0, 2), (bt.total_pct || 0) >= 0 ? "good" : "bad")
+    + s("Max drawdown", (bt.max_dd_pct || 0).toFixed(2) + "%", "warn")
+    + s("Fees charged", money(bt.fees || 0, 0));
+  const rows = bt.by_gear || [];
+  document.querySelector("#bt-table tbody").innerHTML = rows.map((g) => `<tr>
+    <td>${badge(g.gear)}</td><td>${g.trades}</td><td>${(g.win_pct || 0).toFixed(0)}%</td>
+    <td class="${g.avg_r >= 0 ? "good" : "bad"}">${signed(g.avg_r, 2)}</td>
+    <td class="${g.pnl >= 0 ? "good" : "bad"}">${money(g.pnl, 0)}</td>
+  </tr>`).join("");
 }
 
 function renderStreams(data) {
-  const decisions = (data.decisions || []).slice(0, 24);
-  $("decisions").innerHTML = decisions.map((d) => `<div class="line ${d.decision.toLowerCase()}">
+  const decisions = (data.decisions || []).slice(0, 26);
+  $("decisions").innerHTML = decisions.map((d) => `<div class="line ${String(d.decision || "").toLowerCase()}">
     <span class="t">${time(d.ts)}</span>
-    <span class="tag">${d.decision}</span>
-    <span class="sym">${d.symbol}</span>
-    <span class="msg">${d.reason}</span>
+    <span class="tag">${esc(d.decision)}</span>
+    <span class="sym">${esc(d.symbol)}</span>
+    <span class="msg">${esc(d.reason)}</span>
   </div>`).join("") || `<div class="empty small">Waiting for the first cycle.</div>`;
 
   const events = (data.events || []).slice(0, 18);
-  $("events").innerHTML = events.map((e) => `<div class="line ${e.level}">
+  $("events").innerHTML = events.map((e) => `<div class="line ${esc(e.level)}">
     <span class="t">${time(e.ts)}</span>
-    <span class="tag">${e.level}</span>
-    <span class="msg">${e.message}</span>
+    <span class="tag">${esc(e.level)}</span>
+    <span class="msg wide">${esc(e.message)}</span>
   </div>`).join("") || `<div class="empty small">No events yet.</div>`;
 }
 
@@ -489,15 +515,14 @@ async function refresh() {
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     const state = data.state || {};
-    state.reasons = {};
-    (data.decisions || []).forEach((d) => { if (!state.reasons[d.symbol]) state.reasons[d.symbol] = d.reason; });
     renderHero(state);
     renderChart(state);
     renderRecon(state);
     renderBook(state);
+    renderLearner(state);
+    renderJournal(state);
     renderUniverse(state);
-    renderTape(state);
-    renderResearch(data.research);
+    renderBacktest(data.backtest);
     renderStreams(data);
     $("chart-note").title = state.last_cycle || "";
   } catch (err) {
@@ -509,12 +534,11 @@ async function refresh() {
 
 $("toggle").addEventListener("click", async () => {
   const paused = $("toggle").dataset.paused === "1";
-  const url = paused ? "control/resume" : "control/pause";
-  await fetch(url, {method: "POST", headers: {"X-Ares-Action": "dashboard"}});
+  await fetch(paused ? "control/resume" : "control/pause", {method: "POST", headers: {"X-Ares-Action": "dashboard"}});
   refresh();
 });
 
-window.addEventListener("resize", () => { refresh(); });
+window.addEventListener("resize", () => refresh());
 refresh();
 setInterval(refresh, 20000);
 </script>

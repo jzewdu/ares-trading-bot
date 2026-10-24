@@ -1,5 +1,9 @@
 # How ARES was built
 
+> The strategy has moved twice since this timeline: a delta-neutral carry book
+> on 2026-10-23, then the current gear-shift desk on 2026-10-24. The history
+> below records how the project was built, not what it trades now.
+
 ## Timeline
 
 | When | What happened |
