@@ -114,6 +114,9 @@ class Engine:
             self._set_status("Paper-only configuration error", str(exc))
             return
         self._init_account(client)
+        # The first scan pulls 90 days of bars for every coin; say so instead of
+        # leaving the dashboard on its startup message for a minute.
+        self._set_status("Scanning the market for a gear")
         while not self._stop.is_set():
             try:
                 self._cycle(client)

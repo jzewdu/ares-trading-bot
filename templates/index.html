@@ -187,12 +187,13 @@
   </section>
 
   <footer class="foot">
-    <p><b>How it trades.</b> Each cycle rebuilds closed 4h bars. ADX above 22 with efficiency above 0.30
-      selects the <b>trend</b> gear and buys a fresh break of the 20-bar high, trailing 3 ATR.
-      ADX below 18 with efficiency below 0.22 selects the <b>range</b> gear, buys the lower Bollinger band
-      and sells the middle. Anything else — including downtrends, because the account cannot short — is
-      <b>stand aside</b>. Stops are 2 ATR in trend and 1.5 ATR in range; positions are sized so the stop
-      costs 0.75% of equity before the learner's multiplier.</p>
+    <p><b>How it trades.</b> Each cycle rebuilds closed 4h bars. ADX above 25, efficiency above 0.30
+      and a 0.35% EMA20/EMA60 separation select the <b>trend</b> gear: a fresh break of the 20-bar high,
+      stopped 3 ATR away, targeted 9 ATR out and trailed 4.5 ATR. ADX at or below 22 with efficiency
+      below 0.22 and a wide band selects the <b>range</b> gear: buy the lower band with RSI at or below
+      35 and sell the middle. Anything else — including downtrends, because the account cannot short —
+      is <b>stand aside</b>. Positions are sized so the stop costs 0.75% of equity before the learner's
+      multiplier.</p>
     <p><b>What is real.</b> Every entry and exit is a market order on the Alpaca paper account, filled and
       reconciled against the broker's positions. Equity is Alpaca's own equity; P&amp;L is net of the fees
       actually charged (0.25% per side, taken in coin on buys). The learner only exists in this account's
