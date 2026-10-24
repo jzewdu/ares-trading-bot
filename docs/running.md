@@ -1,5 +1,10 @@
 # Running ARES
 
+> **Superseded 2026-10-23.** The service, unit and state path described here are
+> unchanged, but the engine now runs the delta-neutral carry book in the
+> [README](../README.md). `systemctl restart ares-bot` still needs root; without
+> it, reload with `kill -HUP $(systemctl show ares-bot -p MainPID --value)`.
+
 ARES is one Python process plus gunicorn, serving a localhost dashboard, on a
 **Raspberry Pi 3 Model A+**. It is paper-trading only.
 

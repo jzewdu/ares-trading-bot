@@ -1,102 +1,136 @@
-# ARES — ares-trading-bot
+# Ares Crypto Bot — delta-neutral carry desk
 
-ARES is a **paper-only** crypto trading bot for a Raspberry Pi 3 Model A+. Every
-five minutes it scans Alpaca's active USD/USDC pairs for a 15-minute momentum
-breakout, opens at most five small positions, and exits any position that falls
-4% below its entry. It starts paused, pauses itself at a 3% daily loss, and
-reports through a password-protected local dashboard.
+A small Python service for a Raspberry Pi 3 Model A+ that holds a market-neutral
+crypto book: long spot, short the matching perpetual, collecting funding. It
+runs in paper mode only and shows its book in an authenticated local dashboard.
 
-It cannot trade live: the Alpaca client refuses to start unless
-`ALPACA_PAPER=true`, and the paper host is hardcoded.
+## The trade
 
-> Educational project, paper money only. Not financial advice.
+Each pair is two legs of equal notional:
 
-## The loop
+- **long spot** on Alpaca — a live paper order, filled and confirmed,
+- **short perpetual** on Hyperliquid (priced at Hyperliquid's mark).
 
-```
-every 300s (POLL_SECONDS)
-   │
-   ├─ 1. account equity → pass on it, or pause if today's baseline -3%
-   ├─ 2. list active Alpaca crypto assets, keep /USD and /USDC pairs
-   ├─ 3. fetch 36h of 15-minute bars for those pairs (capped by MAX_PAIRS)
-   ├─ 4. defensive exits first: any owned position ≤ entry × 0.96 → market sell
-   ├─ 5. if paused → stop here (exits above still ran)
-   ├─ 6. entries: 20-bar breakout + 20/50 SMA trend + volume confirmation,
-   │      sized to 3% of equity, capped by 15% total exposure
-   └─ 7. sleep 300s
-```
+Price moves cancel, so the book has no directional exposure — net delta sits
+within a few basis points of zero. What remains is:
 
-Full detail, including the signal maths: [docs/how-it-works.md](docs/how-it-works.md).
+1. **funding** paid by the perp every hour to the short when the rate is positive,
+2. **basis** — the perp premium over its index, plus any gap between the two venues,
+3. **fees** — Alpaca's real crypto fee on the spot leg, 0.045% Hyperliquid taker on the perp.
 
-## Risk limits
+Realised equity reconciles to those three components exactly; the dashboard
+shows the split rather than a single opaque number.
 
-These are the defaults in `config.py`, and every one is enforced in code:
+### The long leg is broker truth
 
-| Limit | Value | Behaviour |
-| --- | --- | --- |
-| Per position | 3% of equity | order notional is clamped to this |
-| Total exposure | 15% of equity | new entries stop at the cap |
-| Daily loss | 3% of equity | pauses new entries until you resume |
-| Open positions | 5 | new entries stop at the cap |
-| Pairs scanned | 56 | keeps the Pi's five-minute cycle affordable |
-| Protective exit | −4% from entry | market sell, checked every cycle |
-| Poll interval | 300 s (floor 60 s) | one full scan per cycle |
+Every entry submits a market buy and waits for the fill. The pair is then sized
+from **Alpaca's position**, not from the request: Alpaca charges its 25 bps
+crypto fee in coin, so the quantity that lands is 0.25% smaller than the order
+reports. Sizing the short off the order would leave the hedge silently short.
+Each position stores the broker's order id and is reconciled against Alpaca's
+positions every cycle; the dashboard shows `alpaca fill: verified` only when the
+quantities match within 0.5%. Cash in the ledger *is* the broker's cash, so the
+long leg can never drift from the account.
 
-## Repository map
+Entries also refuse a thin book: the quoted bid/ask must be inside **0.10%**.
+On 2026-10-23 the live quotes were BTC 0.026%, ETH 0.029%, SOL 0.080%, LINK
+0.169%, DOGE 0.29%, LTC 0.54% — a market order pays that spread twice, so a
+0.54% pair would burn 1% of notional to earn ~9% a year.
 
-```
-.
-├── app.py                  Flask dashboard, Basic auth, pause/resume endpoints
-├── engine.py               the loop: scan → exits → entries, risk checks
-├── strategy.py             the 15-minute breakout signal
-├── alpaca_client.py        paper-only REST calls (market data + orders)
-├── config.py               env-driven settings
-├── state.py                SQLite: events, trades, key/value state
-├── templates/, static/     dashboard UI
-├── ares-bot.service        systemd unit for the Pi
-├── requirements.txt        Flask, requests, gunicorn
-├── docs/
-│   ├── how-it-works.md     signal, sizing, exits, pause semantics
-│   ├── running.md          Pi 3 A+ setup, systemd, dashboard access
-│   ├── build-loop.md       how this was built, in order
-│   └── rollout-plan.md     the original 2026-10-18 build/rollout plan
-└── scripts/
-    ├── publish-from-pi.sh        push edits made on the Pi back into git
-    └── Open Ares Dashboard.*     Windows SSH-tunnel launcher for the dashboard
-```
+## Why this strategy
 
-## Running it
+Measured on **730 days of real hourly funding** (17,520 settlements per coin, 12
+coins, Oct 2024 – Oct 2026; `research/fetch_hl.py`). Fees and slippage are
+charged on both legs, entries and exits.
 
-Setup, environment variables, the systemd unit and dashboard access:
-[docs/running.md](docs/running.md).
+| Measure | Result |
+|---|---|
+| Median funding paid to the short | **10.95% APR** on every coin |
+| Holding one hedged pair for two years | **+7.2% to +9.9% annualised** on capital, max drawdown 0.05–0.7% |
+| Walk-forward (rank on trailing 180d, hold 90d) | **+5.3% annualised**, 0.74% max DD, Sharpe 4.4 |
+| Benchmark, hold BTC + ETH only | **+6.0% annualised**, 0.17% max DD |
+| Deployed basket replay (LINK, BTC, ETH) | **+6.8% annualised**, 0.29% max DD |
 
-Short version on the Pi:
+Two findings shaped the live rules:
 
-```bash
-git clone https://github.com/jzewdu/ares-trading-bot.git ~/ares_trading_bot
-cd ~/ares_trading_bot
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env && chmod 600 .env     # then fill in fresh paper keys
-sudo systemctl enable --now ares
-```
+- **The edge is structural, not tactical.** Hyperliquid's funding formula carries
+  a 0.01%-per-8h interest floor, which is why the median is exactly 10.95% APR.
+  Sharpe is high because the return is nearly a coupon, not a trend.
+- **Rotating into whatever pays most destroys the edge.** Entering when trailing
+  funding exceeded 15% APR and rebalancing daily produced **−8% annualised with
+  45% of notional paid in fees**. Any book that rebalances more than about 25
+  times a year goes net-negative; the live book therefore holds a fixed basket
+  and leaves only when funding turns against it.
 
-Then open the dashboard through an SSH tunnel (`scripts/Open Ares Dashboard.cmd`
-on Windows does this for you).
+## Live configuration
 
-## History
+| Setting | Value |
+|---|---|
+| Basket | LINK, BTC, ETH (`DN_UNIVERSE`) |
+| Slots / sizing | 3 slots, 60% of equity notional, 20% per pair (`DN_SLOTS`, `DN_NOTIONAL_PCT`) |
+| Short margin | 25% of notional (4×), liquidation near a 25% adverse move |
+| Enter | trailing 7d funding above **+2% APR**, perp premium below **2%** and above **−0.25%**, venue gap inside **1%**, Alpaca spot spread under **0.10%** |
+| Exit | trailing 72h funding below **−3% APR**, or perp premium beyond **2%** |
+| Cadence | re-mark every 5 minutes; funding settles hourly against realised rates |
+| Daily stop | entries pause for the UTC day beyond a 3% equity loss; exits keep running |
 
-| When | What happened |
-| --- | --- |
-| 2026-10-09 | **v1** — stock bot, RSI/MACD/SMA, 60s poll, 2% risk / 5% daily stop; Claude Code via Ollama, hosted on PythonAnywhere |
-| After v1 | **Codex** reviewed and refactored the v1 loop |
-| 2026-10-18 | **v2** — this code: paper-only Alpaca crypto breakout bot, dashboard, SQLite state, systemd unit |
-| Then | Deployed to the **Raspberry Pi 3 Model A+** at home |
+## Honest limitations
 
-Details, and what is honestly unknown: [docs/build-loop.md](docs/build-loop.md).
+- **Alpaca cannot short crypto.** Its documented crypto API is spot-only and
+  marks pairs `shortable: false`; there are no crypto perpetuals or borrow. The
+  long leg is a real paper order on the account; the short leg is a **ledger
+  position**, marked at Hyperliquid's real mark and settled on Hyperliquid's
+  real funding. Nothing is deposited on a derivatives venue, so the short leg's
+  P&L and the collected funding are measured, not earned.
+- **Funding can turn.** In the sample, 6–33% of hours paid the short nothing or
+  charged it, and 30-day funding went as low as −30% APR on the weakest coins.
+  The exit rule limits the damage but cannot prevent a settlement gap.
+- **The short leg can be liquidated.** At 4× leverage a 25% rally exhausts the
+  margin even though the spot leg gains elsewhere; the two legs sit in different
+  venues and cannot net margin.
+- **Basis is not free.** Cross-venue gaps of 0.1–0.8% appear regularly, usually
+  because Alpaca's thinner pairs print rarely. Prices older than five minutes
+  are marked on Hyperliquid's index and labelled as such.
+- **Paper only.** The build refuses to start unless `ALPACA_PAPER=true`, and
+  nothing here has been validated with real money.
 
-## Disclaimer
+## Files
 
-Built with AI coding agents. Paper money only, no warranty, not financial
-advice. The strategy is a research candidate: it has not been validated
-out-of-sample and it can lose money in a live market.
+- `engine.py` — carry loop: marks both legs, settles funding, opens/closes pairs.
+- `hl_client.py` — read-only Hyperliquid data (funding, premium, marks).
+- `alpaca_client.py` — paper Alpaca client plus latest-price freshness checks.
+- `strategy.py` — trailing-funding, premium and basis rules.
+- `state.py` — SQLite ledger: positions, funding events, equity marks, decisions.
+- `app.py` — authenticated dashboard and control endpoints.
+- `templates/`, `static/` — dashboard UI.
+- `research/` — data fetch, carry study, walk-forward, summary generator.
+- `test_engine.py` — accounting test: broker-filled entries, fee-in-coin sizing,
+  funding accrual, delta neutrality, exit path, spread gate.
+- `migrate_broker_truth.py` — one-off rewrite of open pairs from broker positions.
+
+## Local setup
+
+`cp .env.example .env`, add paper Alpaca keys and dashboard credentials, then
+`chmod 600 .env`. Install `requirements.txt` in a virtual environment and run
+`gunicorn --workers 1 --threads 4 --bind 127.0.0.1:8080 app:app`. The dashboard
+binds to localhost unless TLS certificates are configured; reach it through an
+SSH tunnel (`ssh -N -L 8099:127.0.0.1:8080 user@host`).
+
+Run `python test_engine.py` for the accounting check, and
+`cd research && python make_summary.py` to regenerate the dashboard's research
+panel from the stored funding history (`hl_funding.json.gz`).
+
+## Deployment
+
+Running on the Pi as `ares-bot.service` (gunicorn, state at
+`/var/lib/ares/ares_state.sqlite3`). Because the unit is a system service, a code
+change needs either `sudo systemctl restart ares-bot` or, without root,
+`kill -HUP $(systemctl show ares-bot -p MainPID --value)` — gunicorn re-forks its
+worker, which re-imports the app and starts a fresh engine thread against the
+same state file. The `HUP` path is what the last deploy used.
+
+Ledger state is not reset by a reload: pairs, funding events and marks survive.
+After any change to how positions are sized, run `migrate_broker_truth.py` once
+to rewrite open pairs from Alpaca's positions.
+
+Rotate the dashboard password and Alpaca keys that have appeared in chat.

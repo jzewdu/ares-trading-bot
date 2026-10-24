@@ -1,46 +1,522 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="30">
-  <title>Ares · Paper Crypto</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ares · Delta-Neutral Carry</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <main class="wrap">
-    <header>
-      <div><p class="eyebrow">ALPACA · PAPER ACCOUNT</p><h1>Ares</h1><p class="sub">Crypto momentum monitor</p></div>
-      <span class="pill {{ 'paused' if state.paused else 'active' }}">{{ 'PAUSED' if state.paused else 'PAPER ACTIVE' }}</span>
-    </header>
-    <section class="notice"><strong>Paper mode only.</strong> Signals can lose money in live markets. The 4% protective exit is checked by polling and may fill later or at a worse price; this dashboard cannot switch to live trading.</section>
-    <section class="grid">
-      <article class="card"><label>Engine status</label><strong>{{ state.status }}</strong><small>Last scan: {{ state.last_cycle or 'not yet' }}</small></article>
-      <article class="card"><label>Market universe</label><strong>{{ state.scanned }} pairs scanned</strong><small>Active Alpaca USD and USDC pairs</small></article>
-      <article class="card"><label>Risk limits</label><strong>3% per position · 15% total</strong><small>3% daily loss pause · 5 position cap</small></article>
-    </section>
-    {% if state.last_error %}<section class="error">{{ state.last_error }}</section>{% endif %}
-    <section class="controls">
-      <button class="stop" type="button" onclick="control('/control/pause')">Pause new entries</button>
-      <button class="go" type="button" onclick="control('/control/resume')">Resume paper trading</button>
-      <span>Pausing stops new entries; existing protective exits keep running. Resume only after checking the account and latest activity.</span>
-    </section>
-    <section class="panel"><div class="section-head"><h2>Recent paper orders</h2><span>{{ trades|length }} shown</span></div>
-      {% if trades %}<div class="table-wrap"><table><thead><tr><th>Time (UTC)</th><th>Pair</th><th>Side</th><th>Size</th><th>Reason</th></tr></thead><tbody>
-      {% for trade in trades %}<tr><td>{{ trade.ts[:19].replace('T',' ') }}</td><td>{{ trade.symbol }}</td><td><span class="tag {{ trade.side }}">{{ trade.side }}</span></td><td>{{ ('$%.2f'|format(trade.notional)) if trade.notional else trade.qty }}</td><td>{{ trade.reason }}</td></tr>{% endfor %}
-      </tbody></table></div>{% else %}<p class="empty">No orders recorded.</p>{% endif %}
-    </section>
-    <section class="panel"><div class="section-head"><h2>Activity</h2><span>{{ events|length }} shown</span></div>
-      {% if events %}<ul class="events">{% for item in events %}<li><time>{{ item.ts[:19].replace('T',' ') }}</time><b>{{ item.level }}</b><span>{{ item.message }}</span></li>{% endfor %}</ul>{% else %}<p class="empty">Waiting for activity.</p>{% endif %}
-    </section>
-    <footer>Use on a trusted home network only. HTTPS is required for network access. Never expose this dashboard to the public internet.</footer>
-  </main>
-  <script>
-    async function control(path) {
-      const response = await fetch(path, {method: 'POST', headers: {'X-Ares-Action': 'dashboard'}});
-      if (!response.ok) alert('Action failed: ' + (await response.text()));
-      else location.reload();
+<div class="scan"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="mark">Λ</span>
+    <span class="word">ARES</span>
+    <span class="tag">DELTA-NEUTRAL CARRY</span>
+  </div>
+  <div class="top-right">
+    <span class="paper">PAPER</span>
+    <span id="status-pill" class="pill">connecting</span>
+    <span id="clock" class="clock">--:--:-- UTC</span>
+    <button id="toggle" class="btn" type="button">Pause</button>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="hero-delta">
+      <div class="label">Net delta</div>
+      <div id="net-delta" class="hero-value">—</div>
+      <div class="delta-gauge" aria-hidden="true">
+        <div class="band"></div>
+        <div class="mid"></div>
+        <div id="delta-marker" class="marker"></div>
+      </div>
+      <div class="hero-sub">
+        <span>Long spot <b id="delta-long">—</b></span>
+        <span>Short perp <b id="delta-short">—</b></span>
+        <span>tolerance <b>±0.25%</b></span>
+      </div>
+    </div>
+    <div class="kpis">
+      <div class="kpi">
+        <div class="label">Book equity</div>
+        <div id="equity" class="kpi-value">—</div>
+        <div id="equity-delta" class="kpi-sub">since inception</div>
+      </div>
+      <div class="kpi accent">
+        <div class="label">Funding collected</div>
+        <div id="funding-total" class="kpi-value">—</div>
+        <div id="funding-today" class="kpi-sub">today —</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Blended carry</div>
+        <div id="carry-apr" class="kpi-value">—</div>
+        <div class="kpi-sub">7d trailing APR · open pairs</div>
+      </div>
+      <div class="kpi">
+        <div class="label">Short margin</div>
+        <div id="margin-used" class="kpi-value">—</div>
+        <div id="leverage" class="kpi-sub">—</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel chart-panel">
+    <div class="panel-head">
+      <div>
+        <h2>Book equity &amp; funding</h2>
+        <p id="chart-note" class="muted">collecting marks…</p>
+      </div>
+      <div class="legend">
+        <span class="lg equity">equity</span>
+        <span class="lg funding">cumulative funding</span>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="equity-chart"></canvas>
+    </div>
+    <div id="recon" class="recon"></div>
+  </section>
+
+  <section class="book-section">
+    <div class="section-head">
+      <h2>Carry book <span id="book-count" class="chip">0 / 3</span></h2>
+      <p class="muted">equal notional both legs · market risk cancels · funding is the return</p>
+    </div>
+    <div id="book" class="book"></div>
+  </section>
+
+  <section class="split">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Funding engine</h2>
+          <p class="muted">live Hyperliquid funding and basis vs Alpaca spot</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="grid" id="universe-table">
+          <thead>
+            <tr><th>pair</th><th>funding APR</th><th>perp premium</th><th>venue gap</th><th>spot</th><th>perp</th><th>book</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Funding settlements</h2>
+          <p class="muted">paid hourly on the short leg</p>
+        </div>
+      </div>
+      <div id="funding-tape" class="tape"></div>
+    </div>
+  </section>
+
+  <section class="panel research">
+    <div class="panel-head">
+      <div>
+        <h2>Research — <span id="research-window">730 days</span></h2>
+        <p class="muted" id="research-hours">hourly funding, real fees, walk-forward selection</p>
+      </div>
+    </div>
+    <div class="research-grid">
+      <div class="stat">
+        <div class="label">Deployed book, 2y replay</div>
+        <div id="replay-ann" class="stat-value">—</div>
+        <div id="replay-meta" class="stat-sub">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Walk-forward, top 3 by trailing funding</div>
+        <div id="wf-ann" class="stat-value">—</div>
+        <div id="wf-meta" class="stat-sub">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Benchmark, hold BTC + ETH</div>
+        <div id="bench-ann" class="stat-value">—</div>
+        <div id="bench-meta" class="stat-sub">—</div>
+      </div>
+      <div class="stat">
+        <div class="label">Fees modelled</div>
+        <div id="fees" class="stat-value">—</div>
+        <div class="stat-sub">spot taker + perp taker, per round trip</div>
+      </div>
+    </div>
+    <div class="research-body">
+      <div class="chart-wrap replay-wrap">
+        <canvas id="replay-chart"></canvas>
+      </div>
+      <div class="table-wrap">
+        <table class="grid compact" id="research-table">
+          <thead>
+            <tr><th>coin</th><th>mean APR</th><th>hours paid</th><th>2y net</th><th>annualised</th><th>max DD</th><th>neg 7d spells</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <p id="conclusion" class="conclusion"></p>
+  </section>
+
+  <section class="split">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Decision stream</h2>
+          <p class="muted">why the book holds, adds or leaves</p>
+        </div>
+      </div>
+      <div id="decisions" class="stream"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>System log</h2>
+          <p class="muted">engine, funding and data events</p>
+        </div>
+      </div>
+      <div id="events" class="stream"></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p><b>How this works.</b> Each pair is long spot on Alpaca and short the same notional on a Hyperliquid perpetual.
+      Price moves cancel; the short collects funding every hour, and the book pays fees on both legs.
+      It leaves a pair when funding turns negative or the basis blows past 2%.</p>
+    <p><b>What is real here.</b> The long spot leg is a live order on the Alpaca paper account — filled, sized from the
+      broker's own fill, and reconciled against the broker's positions every cycle. Perp marks, premiums and funding
+      settlements come from Hyperliquid's public feed. Alpaca cannot short crypto and this build holds no perpetuals
+      account, so only the short leg is a ledger position.</p>
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+const money = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v))
+  ? "—" : (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits: d, maximumFractionDigits: d});
+const signed = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? "—" : (v >= 0 ? "+" : "") + v.toFixed(d);
+const pct = (v, d = 2) => (v === null || v === undefined || Number.isNaN(v)) ? "—" : signed(v, d) + "%";
+const price = (v) => {
+  if (!v) return "—";
+  if (v >= 1000) return "$" + v.toLocaleString("en-US", {maximumFractionDigits: 2});
+  if (v >= 1) return "$" + v.toFixed(3);
+  if (v >= 0.01) return "$" + v.toFixed(5);
+  return v.toExponential(3);
+};
+const time = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toISOString().slice(11, 19);
+};
+const clock = () => {
+  $("clock").textContent = new Date().toISOString().slice(11, 19) + " UTC";
+};
+clock(); setInterval(clock, 1000);
+
+function drawSeries(canvas, series, opts) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(320, rect.width), h = Math.max(120, rect.height);
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const pad = {l: 8, r: 8, t: 10, b: 10};
+  const all = series.flatMap((s) => s.values);
+  if (!all.length) return;
+  let min = Math.min(...all), max = Math.max(...all);
+  if (min === max) { min -= 1; max += 1; }
+  const span = max - min;
+  min -= span * 0.08; max += span * 0.08;
+  const x = (i, n) => pad.l + (w - pad.l - pad.r) * (n <= 1 ? 0.5 : i / (n - 1));
+  const y = (v) => pad.t + (h - pad.t - pad.b) * (1 - (v - min) / (max - min));
+
+  ctx.strokeStyle = "rgba(120,140,170,0.10)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const gy = pad.t + (h - pad.t - pad.b) * (i / 4);
+    ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(w - pad.r, gy); ctx.stroke();
+  }
+
+  series.forEach((s) => {
+    const n = s.values.length;
+    if (!n) return;
+    ctx.beginPath();
+    s.values.forEach((v, i) => {
+      const px = x(i, n), py = y(v);
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    });
+    if (s.fill) {
+      ctx.lineTo(x(n - 1, n), h - pad.b);
+      ctx.lineTo(x(0, n), h - pad.b);
+      ctx.closePath();
+      const grad = ctx.createLinearGradient(0, pad.t, 0, h - pad.b);
+      grad.addColorStop(0, s.fill);
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = grad;
+      ctx.fill();
+      ctx.beginPath();
+      s.values.forEach((v, i) => {
+        const px = x(i, n), py = y(v);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      });
     }
-  </script>
+    ctx.strokeStyle = s.color;
+    ctx.lineWidth = s.width || 1.8;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+  });
+}
+
+function renderHero(state) {
+  const d = state.net_delta_pct || 0;
+  $("net-delta").textContent = (d >= 0 ? "+" : "") + d.toFixed(3) + "%";
+  $("net-delta").className = "hero-value " + (Math.abs(d) < 0.25 ? "good" : Math.abs(d) < 1 ? "warn" : "bad");
+  const marker = $("delta-marker");
+  const pos = Math.max(-1, Math.min(1, d / 1.0));
+  marker.style.left = `calc(${50 + pos * 48}% - 5px)`;
+  $("delta-long").textContent = money(state.gross_notional / 2, 0);
+  $("delta-short").textContent = money(state.gross_notional / 2, 0);
+
+  $("equity").textContent = money(state.equity, 2);
+  const change = (state.equity || 0) - (state.start_equity || 0);
+  const pctChange = state.start_equity ? change / state.start_equity * 100 : 0;
+  $("equity-delta").textContent = `${signed(change)} (${pct(pctChange, 3)}) since inception`
+    + (state.broker_equity ? ` · Alpaca ${money(state.broker_equity, 2)}` : "");
+  $("equity-delta").className = "kpi-sub " + (change >= 0 ? "good" : "bad");
+
+  $("funding-total").textContent = money(state.funding_total || 0, 2);
+  $("funding-today").textContent = `today ${money(state.funding_today || 0, 2)}`;
+  $("carry-apr").textContent = pct(state.carry_apr || 0, 2);
+  $("margin-used").textContent = money(state.margin_used || 0, 0);
+  $("leverage").textContent = `${(state.leverage || 4).toFixed(0)}x short · liquidation ≈ ${((1 / (state.leverage || 4)) * 100).toFixed(0)}% move`;
+
+  const pill = $("status-pill");
+  pill.textContent = state.paused ? "PAUSED" : (state.last_error ? "DEGRADED" : "LIVE");
+  pill.className = "pill " + (state.paused ? "paused" : state.last_error ? "warn" : "live");
+  $("toggle").textContent = state.paused ? "Resume" : "Pause";
+  $("toggle").dataset.paused = state.paused ? "1" : "0";
+}
+
+function renderChart(state) {
+  const marks = state.all_marks || [];
+  const note = $("chart-note");
+  if (marks.length < 2) {
+    note.textContent = "first marks recorded — the curve fills in as the engine cycles";
+    return;
+  }
+  const eq = marks.map((m) => m.equity);
+  const fund = marks.map((m) => (state.start_equity || 0) + (m.funding_cum || 0));
+  drawSeries($("equity-chart"), [
+    {values: fund, color: "rgba(61,220,151,0.55)", fill: "rgba(61,220,151,0.18)", width: 1.4},
+    {values: eq, color: "#6ea8fe", width: 2.0},
+  ]);
+  const first = new Date(marks[0].ts), last = new Date(marks[marks.length - 1].ts);
+  const hours = Math.max(0.1, (last - first) / 3.6e6);
+  note.textContent = `${marks.length} marks over ${hours.toFixed(1)}h · equity ${money(Math.min(...eq), 0)} – ${money(Math.max(...eq), 0)}`;
+}
+
+function renderRecon(state) {
+  const fees = state.fees_total || 0;
+  const funding = state.funding_total || 0;
+  const basis = state.basis_total || 0;
+  const net = (state.equity || 0) - (state.start_equity || 0);
+  const cell = (label, value, cls) => `<span class="recon-item"><i>${label}</i><b class="${cls}">${value}</b></span>`;
+  $("recon").innerHTML = cell("funding", money(funding, 2), funding >= 0 ? "good" : "bad")
+    + cell("basis + mark", money(basis, 2), basis >= 0 ? "good" : "bad")
+    + cell("fees", "-" + money(fees, 2).replace("$", "$"), "bad")
+    + cell("net", money(net, 2), net >= 0 ? "good" : "bad")
+    + cell("reconciled", Math.abs(net - (funding + basis - fees)) < 0.02 ? "exact" : "check", "muted-txt");
+}
+
+function renderBook(state) {
+  const book = state.book || [];
+  $("book-count").textContent = `${book.length} / ${state.slots || 3}`;
+  const host = $("book");
+  if (!book.length) {
+    host.innerHTML = `<div class="empty">
+      <div class="empty-title">No hedged pairs open</div>
+      <p>Entries wait for funding above ${(state.config?.enter_apr ?? 2).toFixed(1)}% APR and a basis inside
+      ${((state.config?.max_premium ?? 0.02) * 100).toFixed(1)}%. The engine re-checks every cycle.</p>
+    </div>`;
+    return;
+  }
+  host.innerHTML = book.map((p) => {
+    const hedge = p.spot ? (p.perp * 0 + (p.perp_entry ? p.perp : p.perp)) : 0;
+    const ratio = p.spot > 0 ? (p.perp / p.spot) : 1;
+    const drift = Math.abs(ratio - 1) * 100;
+    const premiumMove = (p.premium - p.entry_premium) * 100;
+    const staleSpot = p.spot_source && p.spot_source !== "alpaca";
+    return `<article class="pos">
+      <div class="pos-head">
+        <div class="coin-block"><span class="coin">${p.coin}</span><span class="pair">${p.symbol}</span></div>
+        <div class="pos-money">
+          <span class="notional">${money(p.notional, 0)}</span>
+          <span class="per-pair">per leg</span>
+        </div>
+        <div class="pos-apr">${pct(p.apr7d ?? p.funding_apr, 1)}<span>7d carry · ${pct(p.funding_apr, 1)} now</span></div>
+      </div>
+      <div class="legs">
+        <div class="leg long">
+          <div class="leg-name">LONG SPOT <i>Alpaca</i></div>
+          <div class="leg-row"><span>entry</span><b>${price(p.spot_entry)}</b></div>
+          <div class="leg-row"><span>now</span><b>${price(p.spot)}</b></div>
+          <div class="leg-pnl ${p.pnl_spot >= 0 ? "up" : "down"}">${p.pnl_spot >= 0 ? "+" : ""}${money(p.pnl_spot, 2)}</div>
+        </div>
+        <div class="leg short">
+          <div class="leg-name">SHORT PERP <i>Hyperliquid</i></div>
+          <div class="leg-row"><span>entry</span><b>${price(p.perp_entry)}</b></div>
+          <div class="leg-row"><span>now</span><b>${price(p.perp)}</b></div>
+          <div class="leg-pnl ${p.pnl_perp >= 0 ? "up" : "down"}">${p.pnl_perp >= 0 ? "+" : ""}${money(p.pnl_perp, 2)}</div>
+        </div>
+      </div>
+      <div class="hedge">
+        <div class="hedge-label"><span>hedge balance</span><b class="${drift < 0.5 ? "good" : "warn"}">${(ratio * 100).toFixed(2)}%</b></div>
+        <div class="hedge-bar"><div class="hedge-fill" style="width:${Math.min(100, 50 + (ratio - 1) * 500)}%"></div></div>
+      </div>
+      <div class="pos-foot">
+        <span class="foot-stat"><i>funding</i><b class="good">${money(p.funding, 2)}</b></span>
+        <span class="foot-stat"><i>perp premium</i><b>${pct(p.entry_premium * 100, 3)} → ${pct(p.premium * 100, 3)}</b></span>
+        <span class="foot-stat"><i>premium drift</i><b class="${premiumMove <= 0 ? "good" : "bad"}">${pct(premiumMove, 3)}</b></span>
+        <span class="foot-stat"><i>venue gap</i><b class="${Math.abs(p.venue_gap || 0) < 0.005 ? "good" : "warn"}">${pct((p.venue_gap || 0) * 100, 3)}</b></span>
+        <span class="foot-stat"><i>alpaca fill</i><b class="${p.broker_ok ? "good" : "warn"}">${p.broker_ok ? "verified" : "mismatch"}</b></span>
+        <span class="foot-stat"><i>net</i><b class="${p.net >= 0 ? "good" : "bad"}">${money(p.net, 2)}</b></span>
+      </div>
+      <div class="pos-rule">opens ${time(p.opened)} UTC${staleSpot ? " · spot marked on Hyperliquid index (thin Alpaca print)" : ""} · exits if funding ≤ ${state.config?.exit_apr?.toFixed?.(1) ?? "-3.0"}% APR or perp premium ≥ ${((state.config?.max_premium ?? 0.02) * 100).toFixed(1)}%</div>
+    </article>`;
+  }).join("");
+}
+
+function renderUniverse(state) {
+  const body = document.querySelector("#universe-table tbody");
+  const reasons = state.reasons || {};
+  body.innerHTML = (state.universe || []).map((u) => {
+    const reason = reasons[u.symbol] || "";
+    const stale = u.source && u.source !== "alpaca";
+    return `<tr class="${u.in_book ? "in-book" : ""}">
+      <td><span class="sym">${u.coin}</span><span class="tiny">${u.symbol}</span></td>
+      <td><div class="apr-cell"><b class="${(u.apr7d ?? u.funding_apr) >= 0 ? "good" : "bad"}">${pct(u.apr7d ?? u.funding_apr, 1)}</b>
+        <div class="tiny">${pct(u.funding_apr, 1)} now</div>
+        <div class="apr-bar"><div style="width:${Math.min(100, Math.max(0, (u.apr7d ?? u.funding_apr) / 30 * 100))}%"></div></div></div></td>
+      <td class="${u.premium >= 0 ? "warm" : "cool"}">${pct(u.premium * 100, 3)}</td>
+      <td class="${Math.abs(u.gap || 0) < 0.005 ? "" : "warn"}">${pct((u.gap || 0) * 100, 3)}</td>
+      <td>${price(u.spot)}${stale ? '<span class="tiny warn">HL index</span>' : ''}</td>
+      <td>${price(u.mark)}</td>
+      <td>${u.in_book ? '<span class="dot on"></span>held' : `<span class="dot"></span>${reason ? reason : "idle"}`}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderTape(state) {
+  const host = $("funding-tape");
+  const rows = state.funding_events || [];
+  if (!rows.length) {
+    host.innerHTML = `<div class="empty small">No settlements yet — funding is paid on the hour.</div>`;
+    return;
+  }
+  host.innerHTML = rows.map((r) => `<div class="tape-row">
+    <span class="tape-time">${time(r.ts)}</span>
+    <span class="tape-coin">${r.coin}</span>
+    <span class="tape-rate">${(r.rate * 10000).toFixed(3)} bp</span>
+    <span class="tape-amount ${r.amount >= 0 ? "up" : "down"}">${r.amount >= 0 ? "+" : ""}${money(r.amount, 2)}</span>
+  </div>`).join("");
+}
+
+function renderResearch(research) {
+  if (!research || !research.coins) return;
+  $("research-window").textContent = research.window || "730 days";
+  $("research-hours").textContent = `${(research.hours || 0).toLocaleString()} hourly settlements · real fees · walk-forward selection`;
+  const book = research.book_replay || {};
+  $("replay-ann").textContent = pct(book.ann_pct, 2);
+  $("replay-meta").textContent = `${money(book.net_pct, 1).replace("$", "+")} over ${(book.days || 0).toFixed(0)}d · max DD ${(book.dd_pct || 0).toFixed(2)}% · Sharpe ${(book.sharpe || 0).toFixed(1)}`;
+  const wf = research.walkforward || {};
+  $("wf-ann").textContent = pct(wf.ann_pct, 2);
+  $("wf-meta").textContent = `max DD ${(wf.dd_pct || 0).toFixed(2)}% · Sharpe ${(wf.sharpe || 0).toFixed(1)} · fees ${(wf.fees_pct || 0).toFixed(1)}%`;
+  const b = research.benchmark || {};
+  $("bench-ann").textContent = pct(b.ann_pct, 2);
+  $("bench-meta").textContent = `max DD ${(b.dd_pct || 0).toFixed(2)}% · fees ${(b.fees_pct || 0).toFixed(1)}% — selection added little`;
+  const fees = research.fees || {};
+  $("fees").textContent = `${(fees.round_trip_pct || 0).toFixed(2)}%`;
+  $("conclusion").textContent = research.conclusion || "";
+
+  document.querySelector("#research-table tbody").innerHTML = research.coins.map((c) => `
+    <tr>
+      <td><span class="sym">${c.coin}</span></td>
+      <td class="${c.mean_apr >= 0 ? "good" : "bad"}">${pct(c.mean_apr, 1)}</td>
+      <td>${(c.positive_pct || 0).toFixed(0)}%</td>
+      <td class="${c.net >= 0 ? "good" : "bad"}">${pct(c.net, 1)}</td>
+      <td class="${c.ann >= 0 ? "good" : "bad"}">${pct(c.ann, 2)}</td>
+      <td>${(c.dd || 0).toFixed(2)}%</td>
+      <td>${c.neg_spells ?? 0}</td>
+    </tr>`).join("");
+
+  const curve = research.curve || [];
+  if (curve.length > 1) {
+    const base = curve[0][1];
+    drawSeries($("replay-chart"), [{
+      values: curve.map((p) => (p[1] / base - 1) * 100),
+      color: "#3ddc97",
+      fill: "rgba(61,220,151,0.16)",
+      width: 1.8,
+    }]);
+  }
+}
+
+function renderStreams(data) {
+  const decisions = (data.decisions || []).slice(0, 24);
+  $("decisions").innerHTML = decisions.map((d) => `<div class="line ${d.decision.toLowerCase()}">
+    <span class="t">${time(d.ts)}</span>
+    <span class="tag">${d.decision}</span>
+    <span class="sym">${d.symbol}</span>
+    <span class="msg">${d.reason}</span>
+  </div>`).join("") || `<div class="empty small">Waiting for the first cycle.</div>`;
+
+  const events = (data.events || []).slice(0, 18);
+  $("events").innerHTML = events.map((e) => `<div class="line ${e.level}">
+    <span class="t">${time(e.ts)}</span>
+    <span class="tag">${e.level}</span>
+    <span class="msg">${e.message}</span>
+  </div>`).join("") || `<div class="empty small">No events yet.</div>`;
+}
+
+async function refresh() {
+  try {
+    const res = await fetch("api/state", {headers: {"Accept": "application/json"}});
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const state = data.state || {};
+    state.reasons = {};
+    (data.decisions || []).forEach((d) => { if (!state.reasons[d.symbol]) state.reasons[d.symbol] = d.reason; });
+    renderHero(state);
+    renderChart(state);
+    renderRecon(state);
+    renderBook(state);
+    renderUniverse(state);
+    renderTape(state);
+    renderResearch(data.research);
+    renderStreams(data);
+    $("chart-note").title = state.last_cycle || "";
+  } catch (err) {
+    const pill = $("status-pill");
+    pill.textContent = "OFFLINE";
+    pill.className = "pill warn";
+  }
+}
+
+$("toggle").addEventListener("click", async () => {
+  const paused = $("toggle").dataset.paused === "1";
+  const url = paused ? "control/resume" : "control/pause";
+  await fetch(url, {method: "POST", headers: {"X-Ares-Action": "dashboard"}});
+  refresh();
+});
+
+window.addEventListener("resize", () => { refresh(); });
+refresh();
+setInterval(refresh, 20000);
+</script>
 </body>
 </html>

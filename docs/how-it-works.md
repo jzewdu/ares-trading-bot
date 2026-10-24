@@ -1,5 +1,11 @@
 # How ARES works
 
+> **Superseded 2026-10-23.** This page describes the v2 trend/breakout bot.
+> The bot now runs a delta-neutral spot/perp carry book; see the
+> [README](../README.md) for the live rules, the research behind them and the
+> broker reconciliation. The files below are still the same, but `strategy.py`
+> and `engine.py` no longer implement what is described here.
+
 Everything here describes the code in this repository — `engine.py`,
 `strategy.py`, `config.py`, `alpaca_client.py`, `state.py`, `app.py`. The
 numbers are the defaults in `config.py`.
