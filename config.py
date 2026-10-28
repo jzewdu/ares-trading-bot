@@ -88,6 +88,10 @@ class Settings:
     max_daily_loss_pct: float = _float("MAX_DAILY_LOSS_PCT", 0.03)
     # How far price may drift from the 4h close before an entry is stale.
     max_signal_drift_atr: float = _float("MAX_SIGNAL_DRIFT_ATR", 2.0)
+    # Alpaca's crypto print feed for BTC can trail the clock by minutes on a
+    # slow link. A core position held for weeks does not care about a few
+    # minutes of quote lag, and a 5-minute gate made the desk skip whole days.
+    max_print_age_seconds: int = _int("MAX_PRINT_AGE_SEC", 900)
 
     # The BTC trend core.
     btc_ema_bars: int = _int("BTC_EMA_BARS", 200)

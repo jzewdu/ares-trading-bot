@@ -29,7 +29,7 @@ from state import (close_trade, closed_trades, event, get_value, open_trade, ope
 
 MAX_ORDER_WAIT = 30
 FEE_RATE = 0.0025        # Alpaca crypto taker, taken in coin on buys and in cash on sells
-MAX_PRINT_AGE = 300      # seconds before a quote is too stale to trade on
+MAX_PRINT_AGE = SETTINGS.max_print_age_seconds   # seconds before a print is too stale
 DATA_ERRORS_BEFORE_PAUSE = 6
 
 
@@ -156,7 +156,7 @@ class Engine:
         set_value("gear_started", datetime.now(timezone.utc).isoformat(timespec="seconds"))
         if not get_value("paused"):
             set_value("paused", "0")
-        event("info", f"Gear-shift book opened on ${equity:,.2f} of paper equity "
+        event("info", f"BTC trend book opened on ${equity:,.2f} of paper equity "
                       f"(${cash:,.2f} cash)")
 
     # ------------------------------------------------------------------ data

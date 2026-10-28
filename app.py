@@ -75,7 +75,7 @@ def resume():
     if not SETTINGS.broker_configured:
         return jsonify({"ok": False, "error": "Fresh Alpaca paper credentials are required"}), 409
     set_value("paused", "0")
-    event("info", "Gear-shift entries resumed from dashboard")
+    event("info", "BTC entries resumed from dashboard")
     return jsonify({"ok": True, "paused": False})
 
 
