@@ -157,8 +157,8 @@ def signal_for(row, settings) -> dict | None:
             "adx": round(row.adx, 2), "er": round(row.er, 3),
             "atr_pct": round(row.atr_pct, 3), "rsi": round(row.rsi, 1),
         },
-        "why": (f"BTC is {row.trend_spread_pct:+.2f}% above its "
-                f"{int(settings.btc_ema_bars)}-bar trend line; stop "
-                f"{settings.trend_stop_atr:.1f} ATR below, brake at the line minus "
-                f"{settings.btc_brake_atr:.1f} ATR"),
+        "why": (f"BTC is {row.trend_spread_pct:+.2f}% versus its "
+                f"{int(settings.btc_ema_bars)}-bar trend line ({row.ema_fast:,.0f}); "
+                f"stop {settings.trend_stop_atr:.1f} ATR below, brake at "
+                f"{row.ema_slow:,.0f}"),
     }
