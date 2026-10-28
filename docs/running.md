@@ -38,16 +38,16 @@ If an old `.env` still says `MAX_POSITION_PCT=0.015`, every position is capped
 at 1.5% of equity and the desk will look almost idle; the gear-shift values are
 `4` and `0.25`.
 
-**The Python code does not read `.env` itself.** `config.py` calls
-`os.getenv()` at import, so under systemd the variables arrive via
-`EnvironmentFile=`, and for a manual run you must export them first:
+`config.py` reads `.env` itself at startup, and systemd also supplies its
+`EnvironmentFile=`. For a manual run you can still export values explicitly:
 
 ```bash
 set -a; source .env; set +a
 ```
 
-Forgetting this is the usual cause of "Setup required" on the dashboard — the
-process simply saw no keys.
+The trading loop only requires paper broker credentials. The dashboard login
+is separate: if either `ARES_UI_USER` or `ARES_UI_PASSWORD` is missing, the
+engine can still trade but every dashboard route correctly returns 503.
 
 ## Install on the Pi
 

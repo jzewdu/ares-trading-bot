@@ -62,13 +62,10 @@ class Settings:
     ui_user: str = os.getenv("ARES_UI_USER", "")
     ui_password: str = os.getenv("ARES_UI_PASSWORD", "")
 
-    # Long-only spot universe: Alpaca cannot short crypto, so the desk only
-    # takes longs and stands aside in downtrends.
-    universe: tuple[str, ...] = _symbols("UNIVERSE", (
-        "BTC", "ETH", "SOL", "LINK", "AVAX", "XRP",
-        "ADA", "DOT", "LTC", "BCH", "UNI", "AAVE",
-    ))
-    bars_days: int = _int("BARS_DAYS", 90)
+    # One instrument. A spot account cannot short, and spreading the same
+    # rules over twelve coins only widened the fee bill; BTC carries the trend.
+    universe: tuple[str, ...] = _symbols("UNIVERSE", ("BTC",))
+    bars_days: int = _int("BARS_DAYS", 120)
 
     # Regime thresholds, measured on closed 4h bars.
     trend_adx: float = _float("TREND_ADX", 25.0)
@@ -79,20 +76,29 @@ class Settings:
     range_min_width: float = _float("RANGE_MIN_WIDTH", 1.5)
 
     # Risk. Risk per trade is the distance to the stop, in equity terms.
-    risk_pct: float = _float("RISK_PCT", 0.0075)
-    max_positions: int = _int("MAX_POSITIONS", 4)
-    max_position_pct: float = _float("MAX_POSITION_PCT", 0.25)
-    max_exposure_pct: float = _float("MAX_EXPOSURE_PCT", 0.75)
+    # A 2% risk budget against an 8-ATR stop puts about half of equity into BTC,
+    # which is the point of a core position: exposure, not scalping.
+    risk_pct: float = _float("RISK_PCT", 0.02)
+    max_positions: int = _int("MAX_POSITIONS", 1)
+    max_position_pct: float = _float("MAX_POSITION_PCT", 0.5)
+    max_exposure_pct: float = _float("MAX_EXPOSURE_PCT", 0.5)
     min_notional: float = _float("MIN_NOTIONAL", 25.0)
     max_spread: float = _float("MAX_SPREAD", 0.0015)
     cooldown_minutes: int = _int("ENTRY_COOLDOWN_MIN", 60)
     max_daily_loss_pct: float = _float("MAX_DAILY_LOSS_PCT", 0.03)
+    # How far price may drift from the 4h close before an entry is stale.
+    max_signal_drift_atr: float = _float("MAX_SIGNAL_DRIFT_ATR", 2.0)
 
-    # Exits.
-    trail_atr: float = _float("TRAIL_ATR", 4.5)
-    trend_stop_atr: float = _float("TREND_STOP_ATR", 3.0)
-    trend_target_atr: float = _float("TREND_TARGET_ATR", 9.0)
-    trend_max_days: float = _float("TREND_MAX_DAYS", 20.0)
+    # The BTC trend core.
+    btc_ema_bars: int = _int("BTC_EMA_BARS", 200)
+    btc_brake_atr: float = _float("BTC_BRAKE_ATR", 2.0)
+
+    # Exits. No trailing stop: on this instrument and this fee schedule it
+    # turned one trend into a dozen round trips. The brake is the exit.
+    trail_atr: float = _float("TRAIL_ATR", 0.0)
+    trend_stop_atr: float = _float("TREND_STOP_ATR", 8.0)
+    trend_target_atr: float = _float("TREND_TARGET_ATR", 400.0)
+    trend_max_days: float = _float("TREND_MAX_DAYS", 365.0)
     range_stop_atr: float = _float("RANGE_STOP_ATR", 2.0)
     range_max_days: float = _float("RANGE_MAX_DAYS", 6.0)
     range_rsi: float = _float("RANGE_RSI", 35.0)
@@ -108,8 +114,14 @@ class Settings:
     tls_key: str = os.getenv("ARES_TLS_KEY", "")
 
     @property
+    def broker_configured(self) -> bool:
+        """Whether paper trading can authenticate; dashboard login is separate."""
+        return bool(self.paper and self.api_key and self.api_secret)
+
+    @property
     def configured(self) -> bool:
-        return bool(self.api_key and self.api_secret and self.ui_user and self.ui_password)
+        """Whether both the broker and authenticated dashboard are configured."""
+        return bool(self.broker_configured and self.ui_user and self.ui_password)
 
     def spot_symbol(self, coin: str) -> str:
         return f"{coin}/USD"

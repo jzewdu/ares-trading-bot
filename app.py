@@ -1,4 +1,4 @@
-"""Authenticated local dashboard for the paper-only Ares gear-shift bot."""
+"""Authenticated local dashboard for the paper-only Ares BTC trend desk."""
 from __future__ import annotations
 
 import hmac
@@ -18,7 +18,7 @@ initialize()
 ENGINE.start()
 
 DECISION_WINDOW = 120
-SUMMARY_PATH = pathlib.Path(__file__).with_name("gear_summary.json")
+SUMMARY_PATH = pathlib.Path(__file__).with_name("btc_summary.json")
 
 
 def load_summary() -> dict:
@@ -72,8 +72,8 @@ def pause():
 def resume():
     if request.headers.get("X-Ares-Action") != "dashboard":
         return jsonify({"ok": False, "error": "Invalid dashboard action"}), 400
-    if not SETTINGS.configured or not SETTINGS.paper:
-        return jsonify({"ok": False, "error": "Fresh paper credentials and dashboard credentials are required"}), 409
+    if not SETTINGS.broker_configured:
+        return jsonify({"ok": False, "error": "Fresh Alpaca paper credentials are required"}), 409
     set_value("paused", "0")
     event("info", "Gear-shift entries resumed from dashboard")
     return jsonify({"ok": True, "paused": False})

@@ -1,123 +1,120 @@
-# Ares — gear-shift crypto desk
+# Ares — BTC trend core
 
-A small Python service for a Raspberry Pi 3 Model A+ that reads the market on
-closed 4-hour bars, selects a **gear** — trend, range, or stand aside — trades
-the setup that fits it, and then scores every closed trade so the next one of
-its kind is sized up, sized down, or refused.
+A small Python service for a Raspberry Pi 3 Model A+ that owns **one instrument,
+BTC/USD**, on a paper Alpaca account. It holds a core long while bitcoin's trend
+is intact, sells when a 4-hour close breaks the trend far enough to matter, and
+waits in cash until the market earns a new entry.
 
 Paper only. Every entry and exit is a real order on the Alpaca paper account.
 
-## The three gears
+## Why this and not the gear desk
 
-| Gear | Test on the last closed 4h bar | What it trades |
-| --- | --- | --- |
-| **Trend** | ADX ≥ 25, Kaufman efficiency ≥ 0.30, EMA20 at least 0.35% above EMA60 and price above EMA60 | Buy a fresh break of the prior 20-bar high, trail 4.5 ATR |
-| **Range** | ADX ≤ 22, efficiency ≤ 0.22, Bollinger width ≥ 1.5% | Buy the lower band with RSI ≤ 35, sell the middle band |
-| **Stand aside** | Anything else, **and every downtrend** | Nothing — the spot account cannot short |
+The previous build scanned twelve coins for trend/range setups. On real bars it
+produced ~1.6 trades a week and, in this market, stood aside for days. So the
+strategy layer was replaced with something measured rather than assumed. All of
+these were replayed on real Alpaca bars with the desk's own costs — 0.25% per
+side plus 0.05% slippage, 0.75%–2% risk sizing:
 
-The signal uses only completed bars. A breakout that has already run more than
-0.75 ATR past the old high is a chase and is skipped, which is what keeps the
-stop close enough for the reward that is left.
-
-## The learner
-
-Each close files the trade under four nested buckets, most specific first:
-
-```
-trend|BTC|adx=24-32|vol=0.8-1.5
-trend|BTC
-trend|adx=24-32|vol=0.8-1.5
-trend
-```
-
-Each bucket stores a decayed count, win count and sum of **net R** (profit
-divided by what the stop risked, after both fees). A candidate is scored against
-the most specific bucket with at least 5 trades, falling back to its parents
-when there is not enough evidence.
-
-| Evidence | Behaviour |
+| Family (long-only, spot) | Result on the replay |
 | --- | --- |
-| < 5 trades | neutral, **1.0×** size — the desk keeps exploring |
-| 5+ trades, positive expectancy | up to **1.4×** size |
-| 5+ trades, expectancy below +0.05R | down to **0.35×** size |
-| 8+ trades, expectancy ≤ 0 | **avoid** — the bucket is refused |
+| 1h Donchian breakouts (24–72 bars, with/without trend filter) | negative after fees |
+| 1h lower-band mean reversion (RSI 25–30) | negative, ~0.14 trades/day |
+| 4h EMA trend with whipsaw exits (enter above the line, exit below) | negative — ~150 round trips paid 75% of the account in fees |
+| 4h trend with hysteresis bands (many variants) | break-even at best, ~57% exposure |
+| **Hold BTC, sell only on a real break** | **+8.18%, 6.35% max drawdown, 66% of the time in the market** |
+| Buy and hold BTC, same window | +22.4%, larger drawdown, 100% exposure |
 
-Evidence decays with a 30-day half-life, on read as well as on write, so a
-bucket that stops trading slowly loses its authority instead of freezing. The
-prior is +0.10R with a weight of 6 pseudo-trades: one bad trade cannot block a
-setup, and one lucky trade cannot promote it.
+The conclusion was uncomfortable but clear: **at 0.25% per side, turnover is the
+enemy.** Every rule that traded often lost to fees and whipsaw; the only thing
+that made money was being long and not interfering. The desk is now that
+observation with a risk brake attached.
+
+## The rule
+
+Measured on **closed 4-hour bars**, using only information that was complete
+when the desk acted:
+
+| State | Test on the last closed bar | What the desk does |
+| --- | --- | --- |
+| **Long** | close > 200-bar EMA − 2 ATR | Holds the core long |
+| **Brake** | close < 200-bar EMA − 2 ATR | Sells and waits |
+
+The band between the line and the brake is deliberate hysteresis: a dip below
+the line is normal, a break through the band is not. Re-entry happens as soon as
+the close is back above the brake. There is no trailing stop and no target —
+the brake is the exit. On top of that sits a catastrophe stop at **8 ATR** below
+the fill, checked every five minutes.
 
 ## Risk
 
-- **0.75% of equity at the stop** for every trade, before the learner multiplier.
-- Stop distance: 3 ATR in trend, 2 ATR in range. Position size is risk ÷ stop
-  distance, capped at **25% of equity** per position and **75%** in total.
-- At most **4** open positions; one per coin; a 60-minute cooldown after a close.
-- Trend exits: 9 ATR target, 4.5 ATR trailing stop, 20-day time stop, or an
-  established downtrend. Range exits: middle band, 2 ATR stop, 6-day time stop,
-  or the range breaking into a trend.
+- **2% of equity** is the risk budget; with an 8-ATR stop that puts roughly a
+  quarter to a third of equity into BTC, capped at **50%** per position and 50%
+  in total.
+- **One** position, one instrument, a 60-minute cooldown after a close.
 - Entries pause for the rest of the UTC day after a 3% equity loss. Exits never
   pause.
-- A spot spread above **0.15%** blocks an entry, and a quote older than five
-  minutes cannot be traded against.
+- A spot spread above **0.15%** blocks an entry, a quote older than five minutes
+  cannot be traded against, and a signal more than 2 ATR stale is skipped.
+- The learner still runs: each close files net R into decayed buckets and can
+  size a repeat of that kind of trade up to 1.4×, down to 0.35×, or refuse it
+  after 8 trades of non-positive expectancy.
 
 ## What the replay says
 
-The same regime, signals, stops, exits and fees, replayed over the last **120
-days of real Alpaca 4h bars** across the 12-coin universe:
+`research/btc_bt.py` runs the exact live rule over the last **240 days of real
+Alpaca 4h BTC bars**, charging both fees and slippage:
 
 | Measure | Result |
 | --- | --- |
-| Trades | **28** (≈ 1.6/week) |
-| Win rate | **46%** |
-| Average net R | **+0.53R** |
-| Return on equity | **+11.48%** over 120 days |
-| Max drawdown | **4.53%** |
-| Fees modelled | 0.25% per side + 0.05% slippage per side |
-| Trend gear | 26 trades, 46% win, +0.53R |
-| Range gear | 2 trades, 50% win, +0.47R |
+| Trades | **19** over 240 days (≈ 0.6/week) |
+| Win rate | **11%** — trend following wins rarely and pays big when it does |
+| Average net R | **+0.22R** |
+| Return on equity | **+8.18%** |
+| Max drawdown | **6.35%** |
+| Time in the market | **66%** |
+| Fees paid | ~0.5% per round trip, 19 round trips |
 
-Two honest caveats. The window is a single 120-day sample, and the thresholds
-above were chosen on it, so **this is an in-sample calibration, not a
-walk-forward result** — treat +11% as an upper bound, not a forecast. And the
-range gear barely traded in this sample; its numbers are two trades, not
-evidence of an edge.
+Three caveats, stated plainly:
 
-The learner is not in the replay: the live desk starts neutral and only earns
-its multipliers from its own closed trades.
+1. **A single sample.** 19 trades and one 240-day window is not statistical
+   proof. The window is a bull-ish market; the brake's value shows up in the
+   bear case this sample does not contain.
+2. **It underperforms simply holding.** +8.18% versus +22.4% for buy-and-hold.
+   The brake bought a 6.35% max drawdown instead of a much larger one. If you
+   want maximum upside, holding wins; the desk is insurance, not alpha.
+3. **A green night is roughly a coin flip.** In the replay, 33% of 12-hour
+   windows ended higher (holding it was 50%), the median night was flat, and the
+   worst was −1.4%. No configuration in any test made most nights green —
+   bitcoin does not offer that.
 
 ## What is real
 
 Every buy and sell is a market order on Alpaca's paper account, submitted and
-polled to a terminal fill. Positions are sized from the broker's own quantity
-(a buy of notional `N` receives `N − 0.25%` of coin), and every cycle compares
-the ledger against `GET /v2/positions`. Equity is Alpaca's equity; cash is
-Alpaca's cash; P&L is net of the fees actually charged. Positions worth less
-than a dollar are treated as dust, not as positions.
+polled to a terminal fill. Positions are sized from the broker's own quantity,
+and every cycle compares the ledger against `GET /v2/positions`. Equity is
+Alpaca's equity; cash is Alpaca's cash; P&L is net of the fees actually charged.
+Positions worth less than a dollar are treated as dust.
 
-Alpaca cannot short crypto or trade perpetuals, so the desk is **long-only** and
-stands aside in downtrends. There is no leverage, no live-money path, and the
-client refuses to start unless `ALPACA_PAPER=true`.
+Alpaca cannot short crypto, so the desk is **long-only**. There is no leverage,
+no live-money path, and the client refuses to start unless `ALPACA_PAPER=true`.
 
 ## Files
 
-- `regime.py` — 4h aggregation, ATR/ADX/RSI/Bollinger/Donchian/efficiency, gear
-  classifier.
-- `gears.py` — the breakout and band-fade signals with their stops and targets.
-- `learning.py` — decayed bucket statistics, the sizing multiplier and the
-  avoid gate.
+- `btc_trend.py` — the rule: 200-bar trend line, ATR brake, signal and scores.
+- `regime.py` — 4h bar aggregation and the indicator series both modules share.
+- `learning.py` — decayed bucket statistics, the sizing multiplier, avoid gate.
 - `engine.py` — the loop: analyse, manage exits, size and submit entries,
   reconcile against the broker, record marks.
 - `state.py` — SQLite: trades, equity marks, decisions, events, learned buckets.
 - `alpaca_client.py` — paper Alpaca REST client, paged bars, fill polling,
   truncating quantity formatting.
 - `app.py`, `templates/`, `static/` — authenticated dashboard.
-- `test_engine.py` — regime classification, signal geometry, learner avoidance
-  and decay, broker-backed entry, stop exit, fee accounting and spread gate.
-- `research/gears_bt.py` — the replay and threshold grid that produced the table
-  above (`gear_summary.json` feeds the dashboard panel).
-- `scripts/retire_carry.py` — the one-off used to liquidate the retired
-  delta-neutral book and set the new baseline.
+- `test_engine.py` — trend/brake states, signal geometry, learner avoidance and
+  decay, broker-backed entry, stop exit, fee accounting and spread gate.
+- `research/btc_bt.py` — the replay that writes `btc_summary.json`, which feeds
+  the dashboard's replay panel.
+- `gears.py`, `research/gears_bt.py` — the retired multi-coin gear desk, kept for
+  reference; nothing imports `gears.py` any more.
 
 ## Run it
 
@@ -140,21 +137,18 @@ worker, which re-imports the app and starts a fresh engine thread.
 To regenerate the replay panel:
 
 ```bash
-.venv/bin/python research/gears_bt.py --days 120
-.venv/bin/python research/gears_bt.py --days 120 --grid   # sensitivity
+.venv/bin/python research/btc_bt.py --days 240
 ```
 
 ## Known limits
 
-- **In-sample replay.** 120 days, one parameter set chosen on that window. No
-  walk-forward yet; the live learner is the out-of-sample test.
-- **Fees are the main enemy.** 0.50% round trip means a 3 ATR stop is roughly
-  0.17R of cost. Tighter stops or more frequent trading turn the edge negative.
-- **The learner needs samples.** Until a bucket has 5 closed trades it trades at
-  1.0×; until 8 it cannot refuse anything. Early behaviour is the raw rules.
-- **Spot-only.** Downtrends are stood aside, not shorted. A market that only
-  falls produces no trades.
-- **Gap risk.** Stops are checked every five minutes and sell at market, so a
-  violent move can fill well through the stop.
+- **In-sample replay.** One window, one parameter set. No walk-forward yet.
+- **Fees dominate short horizons.** Anything that trades more than a few times a
+  month on this account has to beat 0.5% per round trip before it earns.
+- **Long-only.** A falling market means cash, not profit.
+- **Gap risk.** The stop is checked every five minutes and sells at market, so a
+  violent move can fill well through it.
+- **Coarse Pi clock.** The daily-loss baseline resets on the UTC date; after a
+  power cut, wait for NTP before trusting it.
 - **Paper only.** Nothing here has been validated with real money, and the
   dashboard is protected by a single HTTP Basic credential.

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ares · Gear Shift</title>
+<title>Ares · BTC Trend Core</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -13,7 +13,7 @@
   <div class="brand">
     <span class="mark">Λ</span>
     <span class="word">ARES</span>
-    <span class="tag">GEAR SHIFT · TREND / RANGE</span>
+    <span class="tag">BTC · 200-BAR TREND CORE</span>
   </div>
   <div class="top-right">
     <span class="paper">PAPER</span>
@@ -26,24 +26,24 @@
 <main>
   <section class="hero">
     <div class="hero-gear">
-      <div class="label">Transmission · live regime</div>
+      <div class="label">BTC · live trend state</div>
       <div id="gear-name" class="gear-name">—</div>
       <div id="gear-sub" class="gear-sub">reading the tape…</div>
       <div class="gear-cells">
         <div class="gear-cell" id="cell-trend">
-          <span class="g-label">TREND</span>
+          <span class="g-label">LONG</span>
           <b id="count-trend">0</b>
-          <i>breakout</i>
+          <i>above the line</i>
         </div>
         <div class="gear-cell" id="cell-range">
-          <span class="g-label">RANGE</span>
+          <span class="g-label">BRAKE</span>
           <b id="count-range">0</b>
-          <i>band fade</i>
+          <i>sell signal</i>
         </div>
         <div class="gear-cell" id="cell-aside">
-          <span class="g-label">ASIDE</span>
+          <span class="g-label">BAND</span>
           <b id="count-aside">0</b>
-          <i>no-trade</i>
+          <i>inside brake</i>
         </div>
       </div>
       <div id="gear-rule" class="gear-rule">—</div>
@@ -130,19 +130,18 @@
   <section class="panel">
     <div class="panel-head">
       <div>
-        <h2>Regime scan · 4h bars</h2>
-        <p class="muted">ADX and Kaufman efficiency decide the gear; the setup decides the trade</p>
+        <h2>BTC · 4h trend</h2>
+        <p class="muted">the 200-bar line decides the position; the brake decides the exit</p>
       </div>
       <div class="legend">
-        <span class="lg trend">trend</span>
-        <span class="lg range">range</span>
-        <span class="lg aside">stand aside</span>
+        <span class="lg trend">long</span>
+        <span class="lg aside">cash</span>
       </div>
     </div>
     <div class="table-wrap">
       <table class="grid" id="universe-table">
         <thead>
-          <tr><th>pair</th><th>gear</th><th>ADX</th><th>efficiency</th><th>ATR%</th><th>RSI</th><th>price</th><th>spread</th><th>score</th><th>action</th></tr>
+          <tr><th>pair</th><th>state</th><th>ADX</th><th>efficiency</th><th>ATR%</th><th>RSI</th><th>price</th><th>spread</th><th>score</th><th>action</th></tr>
         </thead>
         <tbody></tbody>
       </table>
@@ -153,13 +152,13 @@
     <div class="panel-head">
       <div>
         <h2>Replay · <span id="bt-window">—</span></h2>
-        <p class="muted" id="bt-note">the same regime, signals, stops and fees, run over stored 4h bars</p>
+        <p class="muted" id="bt-note">the same trend rule, stop and fees, run over stored 4h bars</p>
       </div>
     </div>
     <div class="research-grid" id="bt-stats"></div>
     <div class="table-wrap">
       <table class="grid compact" id="bt-table">
-        <thead><tr><th>gear</th><th>trades</th><th>win</th><th>avg R</th><th>net</th></tr></thead>
+        <thead><tr><th>state</th><th>trades</th><th>win</th><th>avg R</th><th>net</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -170,7 +169,7 @@
       <div class="panel-head">
         <div>
           <h2>Decision stream</h2>
-          <p class="muted">why a gear fired, passed or was refused</p>
+          <p class="muted">why the long fired, was refused or skipped</p>
         </div>
       </div>
       <div id="decisions" class="stream"></div>
@@ -187,13 +186,12 @@
   </section>
 
   <footer class="foot">
-    <p><b>How it trades.</b> Each cycle rebuilds closed 4h bars. ADX above 25, efficiency above 0.30
-      and a 0.35% EMA20/EMA60 separation select the <b>trend</b> gear: a fresh break of the 20-bar high,
-      stopped 3 ATR away, targeted 9 ATR out and trailed 4.5 ATR. ADX at or below 22 with efficiency
-      below 0.22 and a wide band selects the <b>range</b> gear: buy the lower band with RSI at or below
-      35 and sell the middle. Anything else — including downtrends, because the account cannot short —
-      is <b>stand aside</b>. Positions are sized so the stop costs 0.75% of equity before the learner's
-      multiplier.</p>
+    <p><b>How it trades.</b> One instrument, one rule. Each cycle rebuilds closed 4h bars and asks
+      whether BTC closed above its 200-bar EMA. Above it, the desk holds a core long with an 8-ATR
+      stop underneath; a close more than 2 ATR below that line is the <b>brake</b>, which sells and
+      waits for a close back above the line. No trailing stop and no scalping, because on Alpaca's
+      0.25%-per-side crypto fee every extra round trip has to be paid for before it can earn.
+      Positions are sized to a 2% risk budget, which puts roughly half of equity into BTC.</p>
     <p><b>What is real.</b> Every entry and exit is a market order on the Alpaca paper account, filled and
       reconciled against the broker's positions. Equity is Alpaca's own equity; P&amp;L is net of the fees
       actually charged (0.25% per side, taken in coin on buys). The learner only exists in this account's
@@ -231,7 +229,7 @@ const stamp = (iso) => {
 const clock = () => { $("clock").textContent = new Date().toISOString().slice(11, 19) + " UTC"; };
 clock(); setInterval(clock, 1000);
 
-const GEAR_LABEL = {trend: "TREND", range: "RANGE", stand_aside: "STAND ASIDE"};
+const GEAR_LABEL = {trend: "LONG BTC", range: "RANGE", stand_aside: "IN CASH"};
 const GEAR_CLASS = {trend: "trend", range: "range", stand_aside: "aside"};
 const badge = (gear) => `<span class="gbadge ${GEAR_CLASS[gear] || "aside"}">${esc(GEAR_LABEL[gear] || gear)}</span>`;
 
@@ -284,18 +282,23 @@ function renderHero(state) {
   name.textContent = GEAR_LABEL[gear] || "—";
   name.className = "gear-name " + (GEAR_CLASS[gear] || "aside");
   const counts = state.gear_counts || {};
-  const total = (state.universe || []).length || 1;
+  const row = (state.universe || [])[0] || {};
+  const brake = row.direction === "down" ? 1 : 0;
+  const inside = Math.max(0, (counts.stand_aside || 0) - brake);
   $("count-trend").textContent = counts.trend || 0;
-  $("count-range").textContent = counts.range || 0;
-  $("count-aside").textContent = counts.stand_aside || 0;
+  $("count-range").textContent = brake;
+  $("count-aside").textContent = inside;
   ["trend", "range", "aside"].forEach((g) => $("cell-" + g).classList.remove("active"));
-  $("cell-" + (GEAR_CLASS[gear] || "aside")).classList.add("active");
-  $("gear-sub").textContent = `${counts.trend || 0} trending · ${counts.range || 0} ranging · ${counts.stand_aside || 0} no-trade of ${total} coins`;
+  $("cell-" + (gear === "trend" ? "trend" : brake ? "range" : "aside")).classList.add("active");
+  const gap = Number(row.trend_spread_pct || 0);
+  $("gear-sub").textContent = row.ema_fast
+    ? `BTC ${gap >= 0 ? "+" : ""}${gap.toFixed(2)}% vs the 200-bar line · brake ${money(row.ema_slow || 0, 0)}`
+    : "waiting for enough 4h history";
   $("gear-rule").textContent = state.paused
-    ? "Entries paused — open positions are still managed and closed."
-    : (gear === "trend" ? "Momentum gear: buying fresh 20-bar breakouts, trailing 3 ATR."
-      : gear === "range" ? "Mean-reversion gear: fading the lower band back to the middle."
-      : "No clean regime — the desk sits in cash rather than force a trade.");
+    ? "Entries paused — the open position is still managed and closed."
+    : (gear === "trend" ? "Trend intact: holding the core long with the 8-ATR stop underneath."
+      : brake ? "Brake hit: the desk sold and waits for a close back above the trend line."
+      : "Inside the brake band: no new entry, and nothing to sell yet.");
 
   $("equity").textContent = money(state.equity, 2);
   const net = state.net || 0;
@@ -314,8 +317,9 @@ function renderHero(state) {
   $("edge-sub").textContent = `${(learn.win_pct || 0).toFixed(0)}% win · ${learn.trades || 0} closed trades`;
 
   const pill = $("status-pill");
-  pill.textContent = state.paused ? "PAUSED" : (state.last_error ? "DEGRADED" : "LIVE");
-  pill.className = "pill " + (state.paused ? "paused" : state.last_error ? "warn" : "live");
+  const running = state.loop_alive && state.last_cycle;
+  pill.textContent = state.paused ? "PAUSED" : (state.last_error ? "DEGRADED" : running ? "LIVE" : "STARTING");
+  pill.className = "pill " + (state.paused ? "paused" : state.last_error ? "warn" : running ? "live" : "warn");
   $("toggle").textContent = state.paused ? "Resume" : "Pause";
   $("toggle").dataset.paused = state.paused ? "1" : "0";
 }

@@ -1,10 +1,10 @@
-"""Gear-shift trading loop: read the regime, pick a gear, trade it, learn.
+"""BTC trend-core loop: own bitcoin while its trend holds, stand aside when it breaks.
 
-Each cycle the engine rebuilds 4-hour bars, classifies every coin as trending,
-ranging or no-trade, and only then looks for setups. A trend coin is bought on
-a fresh 20-bar breakout; a range coin is bought at its lower band and sold at
-the middle. Positions are sized from the distance to the stop, so every trade
-risks the same small slice of equity before the learner adjusts it.
+Each cycle the engine rebuilds 4-hour bars and asks one question: is BTC above
+its 200-bar trend line? If it is, the desk holds a core long sized to a fixed
+risk budget. A close more than `BTC_BRAKE_ATR` ATRs below the line is the only
+exit, plus an 8-ATR catastrophe stop. No scaling, no scalping, no twelve-coin
+scan: on Alpaca's 0.25%-per-side crypto fee, turnover is the enemy.
 
 Every exit files the result into `learning.py`, which decays old evidence and
 uses it to shrink, block or lean into the same kind of trade next time.
@@ -19,9 +19,10 @@ import requests
 
 from alpaca_client import AlpacaClient
 from config import SETTINGS
-from gears import signal_for
+from btc_trend import analyse as analyse_trend
+from btc_trend import signal_for
 from learning import advice, summary as learn_summary, update as learn_update
-from regime import RANGE, STAND_ASIDE, TREND, aggregate, classify
+from regime import RANGE, STAND_ASIDE, TREND, aggregate
 from state import (close_trade, closed_trades, event, get_value, open_trade, open_trades,
                    raise_stop, recent_close, recent_decisions, recent_events, recent_marks,
                    record_decision, record_mark, set_value, update_high)
@@ -105,31 +106,39 @@ class Engine:
             self.last_error = error
 
     def _run(self) -> None:
-        if not SETTINGS.configured:
-            self._set_status("Setup required: add fresh paper API keys and dashboard credentials")
+        # Trading readiness is independent of dashboard authentication. Requiring
+        # UI credentials here silently killed the entire engine thread even when
+        # valid paper API keys were available; app.py still protects every route.
+        if not SETTINGS.broker_configured:
+            self._set_status("Setup required: add fresh Alpaca paper API keys")
             return
-        try:
-            client = AlpacaClient()
-        except Exception as exc:
-            self._set_status("Paper-only configuration error", str(exc))
-            return
-        self._init_account(client)
-        # The first scan pulls 90 days of bars for every coin; say so instead of
-        # leaving the dashboard on its startup message for a minute.
-        self._set_status("Scanning the market for a gear")
+        backoff = 60
         while not self._stop.is_set():
             try:
+                client = AlpacaClient()
+                self._init_account(client)
+                # The first scan pulls 90 days of bars; reflect that in status.
+                self._set_status("Scanning BTC for a trend")
                 self._cycle(client)
                 self._data_errors = 0
+                backoff = max(60, SETTINGS.poll_seconds)
+                self._stop.wait(backoff)
             except Exception as exc:
                 self._data_errors += 1
                 message = f"{type(exc).__name__}: {exc}"
-                event("error", message)
-                self._set_status("Data error — holding positions; inspect logs", message)
-                if self._data_errors >= DATA_ERRORS_BEFORE_PAUSE and get_value("paused", "0") == "0":
-                    set_value("paused", "1")
-                    event("warning", "Six failed cycles in a row; entries paused until the feed recovers")
-            self._stop.wait(max(60, SETTINGS.poll_seconds))
+                self._set_status("Data error — holding positions; retrying", message)
+                try:
+                    event("error", message)
+                    if self._data_errors >= DATA_ERRORS_BEFORE_PAUSE and get_value("paused", "0") == "0":
+                        set_value("paused", "1")
+                        event("warning", "Six failed cycles in a row; entries paused until the feed recovers")
+                except Exception as state_exc:
+                    # A state-store fault must not kill the trading loop; retain
+                    # both failures in status so the secondary fault is visible.
+                    self._set_status("Data/state error — holding positions; retrying",
+                                     f"{message}; state error: {type(state_exc).__name__}: {state_exc}")
+                self._stop.wait(backoff)
+                backoff = min(max(backoff * 2, 60), 900)
 
     def _init_account(self, client: AlpacaClient) -> None:
         if get_value("gear_start_equity"):
@@ -186,7 +195,7 @@ class Engine:
                 except (KeyError, TypeError, ValueError):
                     continue
             rows = aggregate(hourly, 4)
-            regimes = classify(rows, SETTINGS)
+            regimes = analyse_trend(rows, SETTINGS)
             if not regimes:
                 ctx[coin] = {
                     "coin": coin, "symbol": symbol, "gear": STAND_ASIDE, "direction": "flat",
@@ -300,11 +309,12 @@ class Engine:
             elif price >= pos["target"]:
                 reason = f"target at {pos['target']:.6g}"
             elif pos["gear"] == TREND:
-                if row["gear"] == STAND_ASIDE and row["direction"] == "down" and row.get("stable", 0) >= 2:
-                    reason = "trend reversed — leaving before the stop"
+                if row["gear"] == STAND_ASIDE and row["direction"] == "down":
+                    reason = (f"trend brake — BTC closed below {row['ema_slow']:,.0f}, "
+                              f"the trend line minus {SETTINGS.btc_brake_atr:.1f} ATR")
                 elif held_days >= SETTINGS.trend_max_days:
                     reason = f"{SETTINGS.trend_max_days:.0f}-day time stop"
-                else:
+                elif SETTINGS.trail_atr > 0:
                     trail = high - SETTINGS.trail_atr * float(row["atr"])
                     if trail > pos["stop"]:
                         raise_stop(pos["id"], trail)
@@ -375,6 +385,9 @@ class Engine:
     def _enter(self, client: AlpacaClient) -> None:
         if get_value("paused", "0") != "0" or self.equity <= 0:
             return
+        if self.cash <= 0:
+            record_decision("PORTFOLIO", "SKIP", "No available cash for a new position")
+            return
         held = {pos["coin"] for pos in open_trades()}
         exposure = self.exposure
         if len(held) >= SETTINGS.max_positions:
@@ -407,7 +420,7 @@ class Engine:
                                 f"{SETTINGS.max_spread * 100:.2f}% cost gate", price)
                 continue
             move = abs(price - signal["entry_ref"]) / max(row["atr"], 1e-12)
-            if move > 0.75:
+            if move > SETTINGS.max_signal_drift_atr:
                 record_decision(symbol, "SKIP",
                                 f"Signal is stale: price has travelled {move:.1f} ATR since the "
                                 f"4h close ({signal['entry_ref']:.6g})", price)
@@ -420,10 +433,12 @@ class Engine:
                 record_decision(symbol, "SKIP", f"Learned avoid — {view['note']}", price,
                                 signal["entry_ref"], spread * 100)
                 continue
-            risk_usd = self.equity * SETTINGS.risk_pct * view["mult"]
             stop_dist = float(signal["stop_dist"])
             if stop_dist <= 0:
                 continue
+            # Preserve the risk budget exactly; if this produces an order below
+            # the configured minimum, skip it rather than inflating stop-risk.
+            risk_usd = self.equity * SETTINGS.risk_pct * view["mult"]
             qty_by_risk = risk_usd / stop_dist
             notional = min(
                 qty_by_risk * price,
@@ -509,9 +524,8 @@ class Engine:
         with self._lock:
             self.start_equity = float(get_value("gear_start_equity", "0") or 0)
             self.last_cycle = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            self.status = ("Trading the trend gear" if self.headline_gear == TREND else
-                           "Trading the range gear" if self.headline_gear == RANGE else
-                           "Standing aside — no clean regime")
+            self.status = ("Long BTC — trend intact" if self.headline_gear == TREND else
+                           "In cash — BTC below its trend line")
             self.last_error = None
 
     # ------------------------------------------------------------------ dashboard
@@ -561,6 +575,8 @@ class Engine:
                     "price": quote.get("price", 0.0), "spread": quote.get("spread"),
                     "age": age, "source": quote.get("source"),
                     "gear": row.get("gear", STAND_ASIDE), "direction": row.get("direction", "flat"),
+                    "ema_fast": row.get("ema_fast", 0.0), "ema_slow": row.get("ema_slow", 0.0),
+                    "trend_spread_pct": row.get("trend_spread_pct", 0.0),
                     "adx": row.get("adx", 0.0), "er": row.get("er", 0.0),
                     "atr_pct": row.get("atr_pct", 0.0), "rsi": row.get("rsi", 0.0),
                     "stable": row.get("stable", 0),
@@ -576,6 +592,8 @@ class Engine:
             net = self.equity - self.start_equity if self.start_equity else 0.0
             return {
                 "status": self.status, "last_cycle": self.last_cycle, "last_error": self.last_error,
+                "loop_alive": bool(self._thread and self._thread.is_alive()),
+                "broker_configured": SETTINGS.broker_configured,
                 "paused": get_value("paused", "0") != "0", "paper": SETTINGS.paper,
                 "gear": self.headline_gear, "gear_counts": self.gear_counts,
                 "equity": self.equity, "start_equity": self.start_equity,
@@ -595,11 +613,10 @@ class Engine:
                 "decisions": recent_decisions(120), "events": recent_events(20),
                 "started": get_value("gear_started", ""),
                 "config": {
-                    "trend_adx": SETTINGS.trend_adx, "trend_er": SETTINGS.trend_er,
-                    "range_adx": SETTINGS.range_adx, "range_er": SETTINGS.range_er,
+                    "btc_ema_bars": SETTINGS.btc_ema_bars,
+                    "btc_brake_atr": SETTINGS.btc_brake_atr,
                     "trend_stop_atr": SETTINGS.trend_stop_atr,
                     "trend_target_atr": SETTINGS.trend_target_atr,
-                    "range_stop_atr": SETTINGS.range_stop_atr,
                     "trail_atr": SETTINGS.trail_atr,
                     "max_spread": SETTINGS.max_spread,
                     "risk_pct": SETTINGS.risk_pct,
