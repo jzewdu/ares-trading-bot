@@ -146,22 +146,34 @@ To regenerate the replay panel:
 .venv/bin/python research/btc_bt.py --days 240
 ```
 
-## On-chain arbitrage (research, not part of the desk)
+## On-chain arbitrage (separate from the desk above)
 
-A separate line of work on Base, documented but not wired into the bot above:
+A second line of work on Base: measure a cross-pool dislocation, then capture it
+atomically or not at all.
 
 - [docs/mev-arb-research.md](docs/mev-arb-research.md) — strategy, sizing math,
   execution paths, risk register, and why the Uniswap-vs-Sushi route as
   originally specified is negative-EV.
-- [docs/mev-phase0.md](docs/mev-phase0.md) — a live shadow scanner and what it
-  actually measured in 8.5 minutes of Base mainnet.
+- [docs/mev-phase0.md](docs/mev-phase0.md) — the shadow scanner and what it
+  measured on Base mainnet.
+- [docs/executor.md](docs/executor.md) — the executor contract, its 21 tests
+  (including real-state forks), and the measured result of the whole loop.
+- [contracts/src/AresArb.sol](contracts/src/AresArb.sol) — Balancer flash loan →
+  two pool swaps → repay and beat the floor, or revert.
 
 ```bash
-python -m mev.scanner --once --top 120 --pages 10
-python -m mev.analyze mev/out/opportunities.jsonl
+python -m mev.scanner --once --top 120 --pages 10    # find edges
+python -m mev.analyze mev/out/opportunities.jsonl     # dedupe them
+
+python -m mev.executor --demo                        # whole loop on a Base fork
+python -m mev.executor --demo --inject-bps 120       # ... with a known dislocation
+python -m mev.executor --dry-run                     # best live route, simulated
+python -m mev.executor --execute                     # submit (needs ARB_PRIVATE_KEY)
 ```
 
-The scanner never signs or submits. It needs no keys and spends nothing.
+The scanner signs nothing. `--demo` runs the full path on a local fork with no
+key and no funds; `--execute` refuses anything that does not simulate above the
+profit floor.
 
 ## Known limits
 

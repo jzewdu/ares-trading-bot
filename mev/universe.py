@@ -130,17 +130,22 @@ def price_tokens(states: list[PoolState]) -> dict[str, float]:
     its opportunities are dropped rather than guessed.
     """
     prices: dict[str, float] = {addr: 1.0 for addr in STABLES}
-    for st in sorted(states, key=lambda s: -(s.reserve0 + s.reserve1)):
+    # ETH is priced from the *median* WETH/stable quote, not from the pool that
+    # looks deepest. A pool sitting at the edge of its tick range reports
+    # virtual reserves that make it look enormous while its price is garbage;
+    # picking it as the anchor then rejects every sane pool as an outlier.
+    weth_quotes = []
+    for st in states:
         for tok, other in ((st.meta.token0, st.meta.token1), (st.meta.token1, st.meta.token0)):
             if tok == WETH and other in STABLES:
                 res_w, res_s = st.reserves_for(WETH)
                 if res_w > 0:
-                    price = res_s / res_w
-                    if 100 < price < 20_000:
-                        prices[WETH] = price
-                        break
-        if WETH in prices:
-            break
+                    quote = res_s / res_w
+                    if 100 < quote < 20_000:
+                        weth_quotes.append(quote)
+    if weth_quotes:
+        weth_quotes.sort()
+        prices[WETH] = weth_quotes[len(weth_quotes) // 2]
 
     for _ in range(3):
         changed = False

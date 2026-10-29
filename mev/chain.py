@@ -63,6 +63,7 @@ SEL = {
     "decimals": selector("decimals()"),
     "symbol": selector("symbol()"),
     "getL1Fee": selector("getL1Fee(bytes)"),
+    "balanceOf": selector("balanceOf(address)"),
 }
 
 
@@ -167,6 +168,31 @@ class Rpc:
                         self.dropped += 1
                     out.append(None)
         return out
+
+    def call_raw(self, to: str, data: str, sender: str | None = None,
+                 block: str = "latest") -> tuple[bool, str]:
+        """eth_call that keeps the revert data instead of hiding it.
+
+        A simulation that reverts is the answer, not a transport failure: the
+        revert selector says whether the route lost money or was simply built
+        wrong.
+        """
+        tx = {"to": to, "data": data}
+        if sender:
+            tx["from"] = sender
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "eth_call",
+                   "params": [tx, block]}
+        res = self._post(payload)
+        if isinstance(res, dict) and "result" in res:
+            return True, res["result"]
+        err = (res.get("error") if isinstance(res, dict) else None) or {}
+        return False, err.get("data") or err.get("message") or "unknown revert"
+
+    def request(self, method: str, params: list):
+        res = self._post({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+        if isinstance(res, dict) and "error" in res:
+            raise RpcError(f"{method}: {res['error']}")
+        return res.get("result") if isinstance(res, dict) else None
 
     def block_number(self) -> int:
         res = self._post({"jsonrpc": "2.0", "id": 1, "method": "eth_blockNumber", "params": []})

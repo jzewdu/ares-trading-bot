@@ -19,17 +19,25 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 from .chain import BASE_RPC, STABLES, WETH, PoolState, Rpc, Universe
-from .math import best_size, usd_gas
+from .math import Sizing, amount_out, best_size, usd_gas
 from .universe import load_pools, price_tokens
 
-GAS_UNITS = 300_000          # flash loan + 2 swaps, planning envelope
+# Measured on a Base fork against the real Vault and real pools (AresArb
+# executed a 2-hop round trip in 517,113 gas). A 550k envelope leaves room for
+# crossing a few ticks.
+GAS_UNITS = 550_000
 TX_BYTES = 1_200             # serialized size used for the L1 fee query
 OUT_DIR = "mev/out"
 
 
 MIN_SIDE_USD = 2_000.0     # each leg needs real depth, not a dust pool
 MAX_PRICE_SKEW = 2.0       # a pool quoting >2x away from its peers is broken
-MAX_IMPACT = 0.10          # never model a fill that eats 10% of a pool
+# Concentrated-liquidity pools are modelled with virtual reserves, which is
+# exact inside the active tick range and flattering beyond it. A 2% cap keeps
+# the model close to reality: at 10% the scanner produced routes whose
+# simulated fill lost money on real pools (seen on WETH/cbBTC), because the
+# trade walked out of the range the model assumed.
+MAX_IMPACT = 0.02          # never model a fill that eats 2% of a pool
 MAX_EDGE_BP = 5_000.0      # a >50% gap on one pair is a broken pool, not arb
 
 
@@ -46,26 +54,26 @@ def evaluate(states: list[PoolState], prices: dict[str, float], gas_usd: float,
             continue
         pools = sorted(pools, key=lambda s: s.meta.address)
 
-        # Sanity: compare every pool to the *deepest* one, never to the median.
-        # Half-drained pools quote absurd prices, and with an even number of
-        # pools a median happily elects the broken one as the reference.
+        # Sanity: compare every pool to the independent price map, never to a
+        # pool from the same list. A pool parked at the edge of its tick range
+        # reports virtual reserves that make it look like the deepest venue in
+        # existence; electing it as the reference hides every real edge on the
+        # pair and keeps the broken quote. The map is a median across venues,
+        # so one bad pool cannot move it.
         px0, px1 = prices.get(pair[0]), prices.get(pair[1])
-        if not px0 or not px1:
+        if not px0 or not px1 or px1 <= 0:
             continue
         base = pair[0]
+        anchor = px0 / px1
 
         def mid(state):
             r_base, r_quote = state.reserves_for(base)
             return r_quote / r_base if r_base > 0 else 0.0
 
-        def depth(state):
-            return min(state.reserve0 * px0, state.reserve1 * px1)
-
-        ref = max(pools, key=depth)
-        ref_mid = mid(ref)
-        if ref_mid <= 0:
+        pools = [s for s in pools if anchor > 0 and
+                 0.5 < mid(s) / anchor < MAX_PRICE_SKEW]
+        if len(pools) < 2:
             continue
-        pools = [s for s in pools if 0.5 < mid(s) / ref_mid < MAX_PRICE_SKEW]
 
         for i in range(len(pools)):
             for j in range(i + 1, len(pools)):
@@ -78,12 +86,40 @@ def evaluate(states: list[PoolState], prices: dict[str, float], gas_usd: float,
                     token_out = pair[0] if token_in == pair[1] else pair[1]
                     a_in, a_out = a.reserves_for(token_in)
                     b_in, b_out = b.reserves_for(token_out)
-                    if min(a_in, a_out) * usd < min_side_usd or min(b_in, b_out) * usd < min_side_usd:
+                    # Depth is checked in dollars on *both* sides of each leg.
+                    # Comparing raw reserve counts against one token's price
+                    # dropped every pool whose WETH side was under 2,000 units
+                    # even when that side was worth millions.
+                    if (min(a_in * usd, a_out * usd_out) < min_side_usd
+                            or min(b_in * usd_out, b_out * usd) < min_side_usd):
                         continue
                     sizing = best_size(a_in, a_out, b_in, b_out,
                                        a.meta.fee_bp, b.meta.fee_bp)
-                    if not sizing or sizing.impact > MAX_IMPACT:
+                    if not sizing:
                         continue
+                    # The profit-maximising size is often several times bigger
+                    # than one pool can absorb. Trade the largest size that
+                    # respects the impact cap on *both* legs instead of
+                    # dropping the route: capping only the buy side used to
+                    # kill every pair whose sell pool was the smaller one.
+                    first_leg = amount_out(sizing.q, a_in, a_out, a.meta.fee_bp)
+                    if sizing.impact > MAX_IMPACT or first_leg > MAX_IMPACT * b_in:
+                        lo, hi = 0.0, sizing.q
+                        for _ in range(40):
+                            mid = (lo + hi) / 2
+                            out_mid = amount_out(mid, a_in, a_out, a.meta.fee_bp)
+                            if mid <= MAX_IMPACT * a_in and out_mid <= MAX_IMPACT * b_in:
+                                lo = mid
+                            else:
+                                hi = mid
+                        q_cap = lo
+                        out_cap = amount_out(amount_out(q_cap, a_in, a_out, a.meta.fee_bp),
+                                             b_in, b_out, b.meta.fee_bp)
+                        if q_cap <= 0 or out_cap <= q_cap:
+                            continue
+                        sizing = Sizing(q=q_cap, out=out_cap, profit=out_cap - q_cap,
+                                        gross_bp=(out_cap - q_cap) / q_cap * 10_000,
+                                        edge_bp=sizing.edge_bp, impact=q_cap / a_in)
                     # A real two-pool arb needs a mid-price gap wider than the
                     # fees it pays, and narrower than anything a sane pool can
                     # quote. Both bounds catch decimals/orientation artefacts.
@@ -119,14 +155,17 @@ def fmt_money(value: float) -> str:
 
 
 def scan_once(rpc: Rpc, uni: Universe, top: int, pages: int, min_net: float,
-              log_path: str | None) -> dict:
+              log_path: str | None, quiet: bool = False,
+              gas_price_wei: int | None = None) -> dict:
     pools = load_pools(uni, top=top, pages=pages)
     metas = [m for m, _ in pools]
     states = uni.states(metas)
     if not states:
         raise SystemExit("no pool state returned - RPC problem?")
 
-    gas_price = rpc.gas_price_wei()
+    # A fork node reports its own synthetic gas price; callers that know the
+    # real chain price (the demo) pass it in instead of being lied to.
+    gas_price = rpc.gas_price_wei() if gas_price_wei is None else gas_price_wei
     l1_fee = rpc.l1_fee_wei(TX_BYTES)
     prices = price_tokens(states)
     eth = prices.get(WETH, 3_000.0)
@@ -136,10 +175,11 @@ def scan_once(rpc: Rpc, uni: Universe, top: int, pages: int, min_net: float,
     results, by_pair = evaluate(states, prices, gas_usd)
     live = [r for r in results if r["net_usd"] >= min_net]
 
-    print(f"\nblock {block:,}  |  {len(states)} pools  |  {len(by_pair)} token pairs  |  "
-          f"gas {gas_price / 1e9:.4f} gwei + L1 {l1_fee / 1e18 * eth:.5f} USD "
-          f"= {fmt_money(gas_usd)}/attempt")
-    if live:
+    if not quiet:
+        print(f"\nblock {block:,}  |  {len(states)} pools  |  {len(by_pair)} token pairs  |  "
+              f"gas {gas_price / 1e9:.4f} gwei + L1 {l1_fee / 1e18 * eth:.5f} USD "
+              f"= {fmt_money(gas_usd)}/attempt")
+    if live and not quiet:
         print(f"{'pair':22s} {'buy':26s} {'sell':26s} {'edge':>7s} {'size':>10s} "
               f"{'gross':>9s} {'net':>9s} {'impact':>7s}")
         for r in live[:25]:
@@ -149,7 +189,7 @@ def scan_once(rpc: Rpc, uni: Universe, top: int, pages: int, min_net: float,
             print(f"{r['pair']:22s} {buy:26s} {sell:26s} {s.edge_bp:>6.1f}b "
                   f"{fmt_money(r['size_usd']):>10s} {fmt_money(r['gross_usd']):>9s} "
                   f"{fmt_money(r['net_usd']):>9s} {s.impact * 100:>6.2f}%")
-    else:
+    elif not quiet:
         near = results[0] if results else None
         extra = ""
         if near:
