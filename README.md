@@ -61,28 +61,31 @@ the fill, checked every five minutes.
 
 ## What the replay says
 
-`research/btc_bt.py` runs the exact live rule over the last **240 days of real
-Alpaca 4h BTC bars**, charging both fees and slippage:
+`research/btc_bt.py` runs the exact live rule over real Alpaca 4h BTC bars,
+charging both fees and slippage. Two windows, because one is not evidence:
 
-| Measure | Result |
-| --- | --- |
-| Trades | **19** over 240 days (≈ 0.6/week) |
-| Win rate | **11%** — trend following wins rarely and pays big when it does |
-| Average net R | **+0.22R** |
-| Return on equity | **+8.18%** |
-| Max drawdown | **6.35%** |
-| Time in the market | **66%** |
-| Fees paid | ~0.5% per round trip, 19 round trips |
+| Measure | 240 days | 900 days |
+| --- | --- | --- |
+| Trades | **4** | **21** |
+| Win rate | **50%** | **24%** |
+| Average net R | **+1.13R** | **+0.24R** |
+| Return on equity | **+9.06%** | **+9.83%** |
+| Max drawdown | **4.03%** | **9.20%** |
+| Buy and hold, same window | +16.98% | +30.38% |
+| Time in the market | 66% | 67% |
 
 Three caveats, stated plainly:
 
-1. **A single sample.** 19 trades and one 240-day window is not statistical
-   proof. The window is a bull-ish market; the brake's value shows up in the
-   bear case this sample does not contain.
-2. **It underperforms simply holding.** +8.18% versus +22.4% for buy-and-hold.
-   The brake bought a 6.35% max drawdown instead of a much larger one. If you
-   want maximum upside, holding wins; the desk is insurance, not alpha.
-3. **A green night is roughly a coin flip.** In the replay, 33% of 12-hour
+1. **It underperforms simply holding.** +9.83% versus +30.38% over 900 days.
+   The brake bought a 9.20% max drawdown instead of the 29% slide the second
+   half of that sample contains. If you want maximum upside, holding wins; the
+   desk is insurance, not alpha.
+2. **Turnover is the thing that kills it.** Deleting the 3-ATR re-arm gate makes
+   the same rule over the same 900 days return **−8.72%** across 123 round trips;
+   at 1-ATR it still loses. The gate exists because the first live brake exit
+   sold at $79,838 and the desk re-bought at $80,149 — $203 above its own exit
+   trigger — and paid 50bp to stand in the same place.
+3. **A green night is roughly a coin flip.** In an earlier replay, 33% of 12-hour
    windows ended higher (holding it was 50%), the median night was flat, and the
    worst was −1.4%. No configuration in any test made most nights green —
    bitcoin does not offer that.
@@ -110,7 +113,10 @@ no live-money path, and the client refuses to start unless `ALPACA_PAPER=true`.
   truncating quantity formatting.
 - `app.py`, `templates/`, `static/` — authenticated dashboard.
 - `test_engine.py` — trend/brake states, signal geometry, learner avoidance and
-  decay, broker-backed entry, stop exit, fee accounting and spread gate.
+  decay, broker-backed entry, stop exit, fee accounting, spread gate and the
+  brake re-arm gate.
+- `research/rearm_sweep.py` — the parameter sweep and half-sample check that
+  chose the 3-ATR re-arm distance.
 - `research/btc_bt.py` — the replay that writes `btc_summary.json`, which feeds
   the dashboard's replay panel.
 - `gears.py`, `research/gears_bt.py` — the retired multi-coin gear desk, kept for
@@ -139,6 +145,23 @@ To regenerate the replay panel:
 ```bash
 .venv/bin/python research/btc_bt.py --days 240
 ```
+
+## On-chain arbitrage (research, not part of the desk)
+
+A separate line of work on Base, documented but not wired into the bot above:
+
+- [docs/mev-arb-research.md](docs/mev-arb-research.md) — strategy, sizing math,
+  execution paths, risk register, and why the Uniswap-vs-Sushi route as
+  originally specified is negative-EV.
+- [docs/mev-phase0.md](docs/mev-phase0.md) — a live shadow scanner and what it
+  actually measured in 8.5 minutes of Base mainnet.
+
+```bash
+python -m mev.scanner --once --top 120 --pages 10
+python -m mev.analyze mev/out/opportunities.jsonl
+```
+
+The scanner never signs or submits. It needs no keys and spends nothing.
 
 ## Known limits
 

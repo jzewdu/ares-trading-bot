@@ -96,6 +96,16 @@ class Settings:
     # The BTC trend core.
     btc_ema_bars: int = _int("BTC_EMA_BARS", 200)
     btc_brake_atr: float = _float("BTC_BRAKE_ATR", 2.0)
+    # After a brake exit the desk waits for price to climb this far back above
+    # the brake before paying the fee to re-enter. Without it a market that
+    # chops across the line buys the same loss twice: the first live brake exit
+    # sold at 79,838 and the desk re-bought at 80,149, only 0.25% over the
+    # trigger it had just sold under.
+    # 3.0 was not chosen for the best headline number: on 900 days of BTC bars
+    # every value from 1.0 to 2.0 still lost money at a 200-bar line and a 2-ATR
+    # brake, and 3.0 was the smallest setting that turned the same rule positive
+    # in both halves of the sample. Fewer trades is the point.
+    btc_rearm_atr: float = _float("BTC_REARM_ATR", 3.0)
 
     # Exits. No trailing stop: on this instrument and this fee schedule it
     # turned one trend into a dozen round trips. The brake is the exit.

@@ -428,6 +428,21 @@ class Engine:
             last = recent_close(coin)
             if last and _hours_since(last.get("closed_ts", "")) * 60 < SETTINGS.cooldown_minutes:
                 continue
+            # A brake exit is not a dip to buy back immediately. Requiring a
+            # margin above the brake keeps a market oscillating around the line
+            # from charging the desk 50bp of fees per oscillation.
+            if (last and str(last.get("exit_reason", "")).startswith("trend brake")
+                    and SETTINGS.btc_rearm_atr > 0):
+                brake = float(row.get("ema_slow") or 0.0)
+                atr_now = float(row.get("atr") or 0.0)
+                need = brake + SETTINGS.btc_rearm_atr * atr_now
+                if brake > 0 and atr_now > 0 and price < need:
+                    record_decision(
+                        symbol, "SKIP",
+                        f"Re-arm: the last exit was the brake, so price must reclaim "
+                        f"{need:,.0f} ({SETTINGS.btc_rearm_atr:.1f} ATR above the "
+                        f"{brake:,.0f} brake) before a new position is paid for", price)
+                    continue
             view = advice(signal["gear"], coin, float(row["adx"]), float(row["atr_pct"]))
             if view["mult"] <= 0:
                 record_decision(symbol, "SKIP", f"Learned avoid — {view['note']}", price,

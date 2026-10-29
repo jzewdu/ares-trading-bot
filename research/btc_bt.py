@@ -57,6 +57,7 @@ def run(bars: list[dict], days: int) -> dict:
     trades: list[dict] = []
     curve: list[tuple[int, float]] = []
     last_exit_ts = 0
+    last_exit_reason = ""
 
     for ts in times:
         bar = by_ts[ts]
@@ -79,9 +80,18 @@ def run(bars: list[dict], days: int) -> dict:
                                "reason": reason, "fees": pos["fee_in"] + pos["qty"] * fill * FEE})
                 pos = None
                 last_exit_ts = ts
+                last_exit_reason = reason
         if pos is None and row and ts != times[-1]:
             sig = signal_for(row, SETTINGS)
-            if sig and row.ts > last_exit_ts:
+            # Same re-arm gate the live engine runs: after a brake exit the
+            # close must clear the brake by BTC_REARM_ATR ATRs before the desk
+            # pays the fee to get back in.
+            rearm_blocked = (
+                last_exit_reason.startswith("trend brake")
+                and SETTINGS.btc_rearm_atr > 0
+                and bar["c"] < row.ema_slow + SETTINGS.btc_rearm_atr * row.atr
+            )
+            if sig and row.ts > last_exit_ts and not rearm_blocked:
                 price = bar["c"]
                 entry = price * (1 + SLIP)
                 stop_dist = sig["stop_dist"]
@@ -134,7 +144,9 @@ def run(bars: list[dict], days: int) -> dict:
             "pnl": sum(pnls),
         }],
         "note": ("same rule, stop and fees as the live desk: 200-bar 4h trend line, "
-                 "2-ATR brake, 8-ATR stop, 0.25% per side plus 0.05% slippage, 2% risk budget"),
+                 f"{SETTINGS.btc_brake_atr:.1f}-ATR brake, "
+                 f"{SETTINGS.btc_rearm_atr:.1f}-ATR re-arm after a brake exit, "
+                 "8-ATR stop, 0.25% per side plus 0.05% slippage, 2% risk budget"),
         "trades_detail": trades,
         "curve": curve,
     }

@@ -242,6 +242,60 @@ last = state.recent_decisions(3)[0]
 print(f"wide spread -> {last['decision']}: {last['reason']}")
 assert "cost gate" in last["reason"]
 
+# ---------------------------------------------------------------- re-arm gate
+# The first live brake exit sold at 79,838 and the desk re-bought at 80,149,
+# $203 above the trigger it had just sold under. A brake exit must not be
+# bought back at the same price: the close has to clear the brake by
+# BTC_REARM_ATR ATRs first, or a market chopping across the line pays 50bp of
+# fees per oscillation.
+def gate_row(close, brake_level=96.0, line=100.0, atr_v=2.0):
+    row = Row(ts=1, gear=TREND, direction="flat", close=close, adx=20.0, er=0.2,
+              atr=atr_v, atr_pct=2.0, ema_fast=line, ema_slow=brake_level,
+              trend_spread_pct=(close - line) / close * 100, rsi=45.0, bb_low=95.0,
+              bb_mid=100.0, bb_up=105.0, bb_width_pct=10.0, don_high=106.0,
+              don_low=94.0, stable=1, reason="test")
+    data = row.as_dict()
+    data.update(coin="BTC", symbol="BTC/USD", signal=signal_for(row, SETTINGS))
+    return data
+
+
+# The learner has already learned this synthetic BTC bucket is a loser, which
+# would veto the entry for the wrong reason; the gate is what is under test.
+with state.connect() as conn:
+    conn.execute("DELETE FROM gear_trades")
+    conn.execute("DELETE FROM learn")
+for pos in state.open_trades():
+    state.close_trade(pos["id"], pos["entry"], 0.0, 0.0, 0.0, 0.0, 0.0, "cleanup", "")
+seed = state.open_trade("BTC", "BTC/USD", TREND, "trend core", 82000.0, 0.0, 0.0,
+                        74000.0, 82000.0, 1.0, 0.0, 0.0,
+                        {"adx": 20.0, "er": 0.2, "atr_pct": 1.0, "rsi": 45.0}, 80.0, "seed")
+state.close_trade(seed, 79900.0, 0.0, 0.0, -560.0, -0.29, 4.0,
+                  "trend brake — BTC closed below 79,926", "test brake exit")
+with state.connect() as conn:
+    conn.execute("UPDATE gear_trades SET closed_ts='2020-01-01T00:00:00+00:00'")
+state.set_value("paused", "0")
+
+near = Engine()
+near.equity, near.cash, near.exposure = 100000.0, 100000.0, 0.0
+near.ctx = {"BTC": gate_row(99.0)}
+near.prices = {"BTC": {"price": 99.0, "spread": 0.0003, "age": 1.0}}
+broker.price = 99.0
+near._enter(broker)
+print(f"0.5 ATR above the brake -> {len(state.open_trades())} position(s)")
+assert not state.open_trades(), "the desk must not buy back a brake exit at the brake"
+assert any("Re-arm" in str(d["reason"]) for d in state.recent_decisions(4)), \
+    "the refusal must say it is waiting for the re-arm level"
+
+far = Engine()
+far.equity, far.cash, far.exposure = 100000.0, 100000.0, 0.0
+far.ctx = {"BTC": gate_row(103.0)}
+far.prices = {"BTC": {"price": 103.0, "spread": 0.0003, "age": 1.0}}
+broker.price = 103.0
+far._enter(broker)
+print(f"3.5 ATR above the brake -> {len(state.open_trades())} position(s)")
+assert len(state.open_trades()) == 1, "a decisive reclaim must re-enable the entry"
+broker.price = trend.close
+
 # A cycle exception is retried; it must not terminate the background loop.
 import engine as engine_module
 
