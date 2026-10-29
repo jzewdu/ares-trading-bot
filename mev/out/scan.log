@@ -1,0 +1,319 @@
+
+block 53,225,549  |  79 pools  |  47 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        6.8b  $3,444.82   $0.2213   $0.2171   0.00%
+0x5be75e->0x833589     uniswap-v3-bas  30.0bp     uniswap-v3-bas   5.0bp       55.4b     $45.52   $0.0460   $0.0419   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   5.0bp     pancakeswap-v3   1.0bp        6.5b    $529.14   $0.0143   $0.0101   0.00%
+
+block 53,225,570  |  89 pools  |  53 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0x833589     pancakeswap-v3   1.0bp     uniswap-v3-bas   1.0bp        3.0b    $102.51  $0.00534  $0.00118   0.00%
+
+block 53,225,594  |  89 pools  |  53 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x833589->0x420000     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp        5.4b  $1,494.34   $0.1183   $0.1141   0.00%
+0x833589->0x420000     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp        4.7b    $374.04  $0.00584  $0.00169   0.00%
+
+block 53,225,614  |  82 pools  |  51 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        7.0b  $7,093.53   $0.5856   $0.5814   0.00%
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        7.2b  $4,717.28   $0.4020   $0.3979   0.00%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        7.3b  $1,962.38   $0.1892   $0.1851   0.01%
+0xcbb7c0->0x420000     aerodrome-slip   5.0bp     aero-slipstrea   0.8bp        7.0b  $1,308.88   $0.0737   $0.0695   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   5.0bp     pancakeswap-v3   1.0bp        7.2b  $1,192.78   $0.0703   $0.0662   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   5.0bp     aerodrome-slip   0.8bp        7.3b    $872.95   $0.0613   $0.0571   0.00%
+
+block 53,225,635  |  96 pools  |  57 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        6.8b  $1,460.05   $0.1030   $0.0988   0.01%
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        5.8b  $2,279.16   $0.0519   $0.0478   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   5.0bp     aerodrome-slip   0.8bp        6.5b    $371.15   $0.0111  $0.00694   0.00%
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        5.8b    $788.20   $0.0107  $0.00657   0.00%
+
+block 53,225,663  |  75 pools  |  44 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00415/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0x833589     pancakeswap-v3   1.0bp     aerodrome-slip   1.5bp        8.6b  $4,463.84     $1.37     $1.36   0.02%
+0x833589->0x420000     aero-slipstrea   5.3bp     pancakeswap-v3   1.0bp        9.8b  $4,139.18   $0.7057   $0.7016   0.00%
+0x833589->0x420000     aerodrome-slip   5.2bp     pancakeswap-v3   1.0bp        9.9b  $2,340.01   $0.4230   $0.4188   0.01%
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        6.6b  $6,389.03   $0.4094   $0.4052   0.00%
+0x833589->0x420000     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp        5.8b  $2,397.33   $0.2336   $0.2294   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     aero-slipstrea   0.8bp        3.8b  $1,779.80   $0.1832   $0.1791   0.01%
+0x420000->0x833589     pancakeswap-v3   1.0bp     uniswap-v3-bas   1.0bp        7.4b    $579.58   $0.1574   $0.1533   0.00%
+0xcbb7c0->0x2ae3f1     aero-slipstrea   2.7bp     aerodrome-slip   3.0bp        7.2b    $457.75   $0.0350   $0.0309   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   5.0bp     aero-slipstrea   0.8bp        6.3b    $555.02   $0.0130  $0.00886   0.00%
+
+block 53,225,675  |  85 pools  |  54 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        8.7b $13,215.74     $2.18     $2.17   0.00%
+0x833589->0x420000     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp        9.4b  $5,989.73     $1.51     $1.51   0.01%
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        8.4b  $7,306.59     $1.05     $1.05   0.00%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        8.7b  $3,230.07   $0.5353   $0.5311   0.02%
+0x833589->0x420000     aero-slipstrea   5.3bp     aerodrome-slip   1.5bp        9.6b  $2,898.30   $0.4044   $0.4002   0.01%
+0x833589->0x420000     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp        6.4b  $2,478.00   $0.3140   $0.3098   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   5.0bp     aero-slipstrea   0.8bp        8.0b  $2,552.20   $0.2719   $0.2677   0.01%
+0xcbb7c0->0x420000     aerodrome-slip   5.0bp     pancakeswap-v3   1.0bp        7.7b  $1,744.68   $0.1489   $0.1448   0.01%
+0x833589->0x420000     aerodrome-slip   5.2bp     aerodrome-slip   1.5bp        8.8b  $1,468.71   $0.1470   $0.1429   0.01%
+0xcbb7c0->0x420000     aerodrome-slip   5.0bp     aerodrome-slip   0.8bp        8.0b  $1,333.76   $0.1432   $0.1390   0.00%
+0x833589->0x420000     pancakeswap-v3   1.0bp     aerodrome-slip   1.5bp        3.0b    $378.28  $0.00977  $0.00561   0.00%
+
+block 53,225,698  |  78 pools  |  50 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        9.6b $17,180.47     $3.62     $3.61   0.00%
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        9.4b $12,090.64     $2.33     $2.32   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     aero-slipstrea   0.8bp        3.8b  $1,779.17   $0.1895   $0.1853   0.01%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     pancakeswap-v3   1.0bp        3.6b  $1,395.14   $0.1237   $0.1195   0.01%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        5.7b    $390.44  $0.00740  $0.00324   0.00%
+
+block 53,225,720  |  87 pools  |  54 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        6.0b  $3,491.81   $0.1114   $0.1073   0.00%
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        6.3b  $2,482.12   $0.1039   $0.0998   0.00%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        6.5b  $1,161.63   $0.0652   $0.0611   0.01%
+
+block 53,225,741  |  95 pools  |  56 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00415/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0x833589     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp       11.5b $11,225.35     $3.99     $3.99   0.00%
+0x420000->0x833589     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp       12.2b  $9,564.81     $3.97     $3.97   0.00%
+0x420000->0x833589     aero-slipstrea   2.9bp     uniswap-v3-bas   1.0bp       13.5b  $1,028.91   $0.4952   $0.4910   0.00%
+0x833589->0x420000     aerodrome-slip   5.2bp     aero-slipstrea   2.9bp       10.5b  $3,004.28   $0.3652   $0.3610   0.01%
+0x420000->0x833589     aero-slipstrea   2.9bp     uniswap-v3-bas   5.0bp        9.3b  $2,856.31   $0.2087   $0.2045   0.00%
+0xcbb7c0->0x833589     aero-slipstrea   4.2bp     pancakeswap-v3   1.0bp        7.4b  $1,107.97   $0.1175   $0.1134   0.00%
+0xb20000->0x833589     aero-slipstrea   3.4bp     aerodrome-slip   5.0bp       15.8b    $271.00   $0.1003   $0.0961   0.00%
+0x833589->0x07b3d9     uniswap-v3-bas   1.0bp     aero-slipstrea   0.9bp        6.9b    $320.15   $0.0795   $0.0753   0.01%
+0x833589->0x420000     pancakeswap-v3   1.0bp     pancakeswap-v3   5.0bp        7.7b    $545.50   $0.0454   $0.0412   0.00%
+0xcbb7c0->0x833589     aerodrome-slip   2.3bp     pancakeswap-v3   1.0bp        4.4b    $428.22   $0.0227   $0.0185   0.00%
+0xcbb7c0->0x833589     aerodrome-slip   5.0bp     pancakeswap-v3   1.0bp        6.7b    $266.90  $0.00983  $0.00567   0.00%
+0xcbb7c0->0x833589     aerodrome-slip   3.5bp     pancakeswap-v3   1.0bp        5.0b    $172.51  $0.00470  $0.00054   0.00%
+
+block 53,225,758  |  93 pools  |  55 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00415/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0xcbb7c0     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        6.8b  $3,332.12   $0.2215   $0.2174   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        7.1b  $1,763.40   $0.1536   $0.1495   0.01%
+0x420000->0x833589     aero-slipstrea   2.9bp     uniswap-v3-bas   1.0bp        7.1b    $336.52   $0.0544   $0.0502   0.00%
+0x420000->0xcbb7c0     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        5.8b  $2,293.77   $0.0494   $0.0453   0.00%
+0x420000->0x833589     aerodrome-slip   1.5bp     uniswap-v3-bas   1.0bp        4.6b    $211.91   $0.0221   $0.0180   0.00%
+0x420000->0x833589     pancakeswap-v3   1.0bp     uniswap-v3-bas   1.0bp        3.8b    $176.61   $0.0158   $0.0117   0.00%
+0x420000->0x833589     aerodrome-slip   5.2bp     uniswap-v3-bas   1.0bp        7.7b    $147.97   $0.0110  $0.00682   0.00%
+
+block 53,225,781  |  81 pools  |  51 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00415/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x833589->0x5be75e     uniswap-v3-bas  30.0bp     uniswap-v3-bas  30.0bp       77.3b    $284.81   $0.2409   $0.2367   0.07%
+0x420000->0x833589     pancakeswap-v3   1.0bp     uniswap-v3-bas   1.0bp        8.4b    $624.57   $0.1984   $0.1942   0.00%
+0x5be75e->0x833589     uniswap-v3-bas  30.0bp     uniswap-v3-bas   5.0bp       77.1b     $91.65   $0.1915   $0.1874   0.01%
+0xcbb7c0->0x833589     aero-slipstrea   2.2bp     pancakeswap-v3   1.0bp        5.1b  $1,179.30   $0.1108   $0.1066   0.00%
+0x420000->0x833589     aero-slipstrea   2.9bp     uniswap-v3-bas   1.0bp        8.0b    $446.72   $0.0929   $0.0887   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        6.7b  $1,195.10   $0.0798   $0.0756   0.01%
+0x420000->0x833589     aerodrome-slip   1.5bp     uniswap-v3-bas   1.0bp        6.6b    $373.19   $0.0770   $0.0728   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     aero-slipstrea   0.8bp        3.0b  $1,075.40   $0.0684   $0.0642   0.01%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     pancakeswap-v3   1.0bp        2.3b    $327.65  $0.00708  $0.00292   0.00%
+0x420000->0x833589     aerodrome-slip   5.2bp     uniswap-v3-bas   1.0bp        7.3b    $102.34  $0.00537  $0.00122   0.00%
+
+block 53,225,795  |  82 pools  |  49 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x5be75e->0x833589     uniswap-v3-bas  30.0bp     uniswap-v3-bas   5.0bp       48.5b     $13.84  $0.00924  $0.00508   0.04%
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
+block 53,225,540  |  81 pools  |  44 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x833589->0x07b3d9     uniswap-v3-bas   1.0bp     aero-slipstrea   0.9bp       10.4b    $545.33   $0.2309   $0.2267   0.01%
+0x420000->0x833589     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp        5.7b  $1,743.60   $0.1137   $0.1096   0.00%
+0x420000->0x833589     aero-slipstrea   2.9bp     uniswap-v3-bas   1.0bp        7.2b    $359.80   $0.0608   $0.0567   0.00%
+0x420000->0x833589     aerodrome-slip   5.2bp     uniswap-v3-bas   1.0bp        8.2b    $195.13   $0.0191   $0.0149   0.00%
+0x420000->0x833589     pancakeswap-v3   1.0bp     uniswap-v3-bas   1.0bp        3.9b    $188.39   $0.0180   $0.0138   0.00%
+
+block 53,225,558  |  85 pools  |  52 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        9.1b $10,050.31     $1.86     $1.86   0.01%
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        7.2b  $3,132.14   $0.2618   $0.2576   0.00%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        7.2b  $1,665.42   $0.1562   $0.1521   0.01%
+
+block 53,225,577  |  84 pools  |  53 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+no opportunity above $0.00000 net
+
+block 53,225,
+0x5be75e->0x833589     uniswap-v3-bas  30.0bp     uniswap-v3-bas   5.0bp     386482.8b     $20.18   $0.0295   $0.0254   0.10%
+0x833589->0x420000     aerodrome-slip   1.5bp     pancakeswap-v3   5.0bp     53046870070.3b    $187.62  $0.00783  $0.00367   0.00%
+
+block 53,225,515  |  96 pools  |  57 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp     12011723.7b  $1,390.32   $0.0936   $0.0894   0.01%
+
+block 53,225,541  |  86 pools  |  53 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0xcbb7c0     pancakeswap-v3   1.0bp     aero-slipstrea   0.8bp     12006906.3b  $1,812.40   $0.0921   $0.0879   0.00%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp     12011732.4b  $1,371.28   $0.0918   $0.0876   0.01%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   0.8bp     12007021.7b    $928.49   $0.0497   $0.0455   0.00%
+
+block 53,225,570  |  82 pools  |  51 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp     12003452.2b    $650.02   $0.0211   $0.0169   0.00%
+
+block 53,225,591  |  76 pools  |  45 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x833589->0x420000     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp     53255246876.3b  $2,302.87   $0.2487   $0.2445   0.00%
+0x833589->0x420000     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp     53249223355.2b  $1,315.79   $0.1006   $0.0964   0.00%
+
+block 53,225,615  |  88 pools  |  53 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x833589->0x420000     pancakeswap-v3   1.0bp     aerodrome-slip   1.5bp     53249992534.6b  $2,387.31   $0.4056   $0.4014   0.01%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp     11990972.0b    $622.94   $0.0189   $0.0147   0.00%
+
+block 53,225,643  |  61 pools  |  40 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x833589->0x420000     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp     53265803499.7b  $2,004.46   $0.1677   $0.1636   0.00%
+
+block 53,225,664  |  88 pools  |  55 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x5be75e->0x833589     uniswap-v3-bas  30.0bp     uniswap-v3-bas   5.0bp     397919.8b     $49.67   $0.0567   $0.0525   0.00%
+
+block 53,225,685  |  96 pools  |  57 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp     11977315.3b  $4,193.80   $0.8536   $0.8494   0.02%
+0x833589->0x420000     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp     53360213904.3b  $3,067.24   $0.5229   $0.5188   0.01%
+0x833589->0x420000     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp     53355819330.0b  $2,225.18   $0.2321   $0.2279   0.00%
+0x833589->0x420000     aero-slipstrea   5.3bp     pancakeswap-v3   1.0bp     53360008990.3b    $832.87   $0.0394   $0.0353   0.00%
+
+block 53,225,710  |  71 pools  |  42 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+no opportunity above $0.00000 net
+
+block 53,225,731  |  93 pools  |  56 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00415/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp     11981745.9b    $388.33  $0.00728  $0.00312   0.00%
+
+block 53,225,758  |  69 pools  |  44 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00415/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x311935->0xcbb7c0     aero-slipstrea   1.6bp     aerodrome-slip   3.0bp     6419356917.1b    $425.01   $0.0685   $0.0643   0.00%
+
+block 53,225,782  |  89 pools  |  53 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+no opportunity above $0.00000 net
+
+==============================================================================
+scans 36   windows with a live opportunity 30
+opportunities 106   gross $81.59   net $81.15   gas/attempt $0.00416
+median size $1,903.16   median edge 12017286.6bp   max edge 53528008083.8bp
+  0x420000->0xcbb7c0       $43.80
+  0x833589->0x420000       $34.73
+  0x5be75e->0x833589       $1.51
+  0x07b3d9->0x833589       $0.6359
+  0x311935->0xcbb7c0       $0.4813
+==============================================================================
+rpc calls 10,287  failed 3,482
+9b    $743.87   $0.0942   $0.0901   0.00%
+0x420000->0x833589     aero-slipstrea   2.9bp     uniswap-v3-bas   1.0bp        7.6b    $387.22   $0.0722   $0.0681   0.00%
+0x420000->0xcbb7c0     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        5.8b  $2,293.77   $0.0494   $0.0452   0.00%
+0xb20000->0x833589     aero-slipstrea   3.4bp     aerodrome-slip   5.0bp       12.4b    $146.13   $0.0292   $0.0251   0.00%
+0x420000->0x833589     uniswap-v3-bas   1.0bp     pancakeswap-v3   5.0bp        7.7b    $142.44   $0.0122  $0.00799   0.01%
+0x420000->0xcbb7c0     aerodrome-slip   5.0bp     aero-slipstrea   0.8bp        6.3b    $530.51   $0.0114  $0.00721   0.00%
+
+block 53,225,782  |  62 pools  |  38 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0x833589     pancakeswap-v3   1.0bp     aerodrome-slip   1.5bp        4.9b    $889.64   $0.1053   $0.1012   0.00%
+
+block 53,225,796  |  79 pools  |  49 token pairs  |  gas 0.0060 gwei + L1 0.00000 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0x833589     pancakeswap-v3   1.0bp     uniswap-v3-bas   1.0bp        3.2b    $121.40  $0.00750  $0.00334   0.00%
+
+block 53,225,874  |  89 pools  |  58 token pairs  |  gas 0.0062 gwei + L1 0.00001 USD = $0.00428/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0xcbb7c0     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        9.4b  $9,237.14     $1.79     $1.79   0.00%
+0x420000->0xcbb7c0     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        9.4b  $7,386.08     $1.49     $1.48   0.00%
+0x833589->0x420000     aero-slipstrea   5.3bp     aerodrome-slip   1.5bp       10.8b  $1,532.98   $0.3060   $0.3018   0.01%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        7.4b  $2,086.53   $0.2156   $0.2113   0.01%
+0x833589->0x420000     aerodrome-slip   5.2bp     aerodrome-slip   1.5bp       10.0b  $1,172.00   $0.1896   $0.1853   0.01%
+0x833589->0x420000     pancakeswap-v3   1.0bp     aerodrome-slip   1.5bp        5.3b    $879.78   $0.1223   $0.1180   0.01%
+0x833589->0x420000     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp        5.5b    $636.76   $0.0367   $0.0325   0.00%
+
+block 53,225,889  |  88 pools  |  54 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00415/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x833589->0x420000     aero-slipstrea   2.9bp     uniswap-v3-bas   5.0bp       15.4b  $9,306.67     $3.50     $3.50   0.01%
+0x833589->0x420000     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp       10.6b  $4,578.15     $1.55     $1.55   0.00%
+0x833589->0x420000     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp       10.0b  $2,835.13   $0.7969   $0.7928   0.00%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   0.8bp        3.7b  $1,450.99   $0.1483   $0.1441   0.01%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     pancakeswap-v3   1.0bp        3.2b  $1,040.17   $0.0716   $0.0675   0.01%
+
+block 53,225,903  |  84 pools  |  55 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00415/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x833589->0x420000     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp        7.2b  $3,495.86   $0.5866   $0.5825   0.00%
+0x833589->0x420000     aero-slipstrea   2.9bp     uniswap-v3-bas   5.0bp        9.9b  $3,709.90   $0.3819   $0.3778   0.00%
+
+block 53,225,917  |  88 pools  |  57 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00415/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        8.3b $17,466.51     $2.58     $2.58   0.00%
+0xcbb7c0->0x420000     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        7.1b  $4,207.07   $0.3300   $0.3259   0.00%
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        6.9b  $1,622.63   $0.1284   $0.1243   0.01%
+
+block 53,225,930  |  88 pools  |  57 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00415/attempt
+no opportunity above $0.00000 net
+
+block 53,225,945  |  87 pools  |  57 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00415/attempt
+no opportunity above $0.00000 net
+
+block 53,225,959  |  83 pools  |  57 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00415/attempt
+no opportunity above $0.00000 net  (best near-miss: 2.7bp edge, $0.00078 gross)
+
+block 53,225,973  |  89 pools  |  57 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00415/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0x833589     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp       12.3b  $3,667.45     $1.46     $1.46   0.01%
+0x420000->0x833589     aero-slipstrea   5.3bp     aerodrome-slip   1.5bp       14.2b  $2,815.56     $1.03     $1.03   0.01%
+0x420000->0x833589     pancakeswap-v3   1.0bp     aerodrome-slip   1.5bp        8.4b  $2,142.08   $0.6292   $0.6250   0.01%
+0x420000->0x833589     aerodrome-slip   5.2bp     aerodrome-slip   1.5bp       12.0b  $1,916.03   $0.5060   $0.5018   0.01%
+0x420000->0x833589     aero-slipstrea   2.9bp     uniswap-v3-bas   5.0bp        9.8b  $1,940.19   $0.1885   $0.1844   0.00%
+0x420000->0x833589     aero-slipstrea   5.3bp     uniswap-v3-bas   5.0bp       11.7b    $912.53   $0.0596   $0.0555   0.00%
+
+block 53,225,987  |  90 pools  |  59 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0x833589     pancakeswap-v3   1.0bp     aerodrome-slip   1.5bp        4.6b    $702.42   $0.0752   $0.0710   0.00%
+
+block 53,226,002  |  87 pools  |  55 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00416/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        9.1b  $3,857.90   $0.7301   $0.7260   0.02%
+0x420000->0xcbb7c0     uniswap-v3-bas   5.0bp     aerodrome-slip   0.8bp        8.8b  $2,650.32   $0.3955   $0.3913   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     aero-slipstrea   0.8bp        4.7b  $2,131.09   $0.3217   $0.3176   0.01%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     pancakeswap-v3   1.0bp        4.8b  $2,162.58   $0.3192   $0.3150   0.01%
+0x420000->0x833589     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp        6.8b  $1,686.36   $0.2521   $0.2480   0.00%
+0x420000->0x833589     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp        6.4b    $956.13   $0.0992   $0.0950   0.00%
+
+block 53,226,016  |  87 pools  |  57 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00418/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0x833589     aero-slipstrea   2.9bp     aerodrome-slip   1.5bp       10.1b  $2,656.69   $0.7655   $0.7613   0.01%
+0x420000->0x833589     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp        6.6b  $1,516.51   $0.2102   $0.2060   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        7.0b  $1,499.87   $0.1268   $0.1226   0.01%
+0x420000->0x833589     pancakeswap-v3   1.0bp     aerodrome-slip   1.5bp        3.5b    $308.85   $0.0153   $0.0111   0.00%
+
+block 53,226,030  |  86 pools  |  56 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00414/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0x833589     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp       10.4b  $3,551.68     $1.16     $1.15   0.01%
+0x420000->0xcbb7c0     aero-slipstrea   4.5bp     pancakeswap-v3   1.0bp        7.7b  $5,049.89   $0.5602   $0.5561   0.00%
+0x420000->0xcbb7c0     aero-slipstrea   4.5bp     aero-slipstrea   0.8bp        7.3b  $3,638.25   $0.3491   $0.3449   0.00%
+0xcbb7c0->0x420000     aerodrome-slip   0.8bp     aero-slipstrea   4.5bp        7.8b  $2,114.24   $0.2542   $0.2500   0.01%
+0x420000->0x833589     aero-slipstrea   5.3bp     pancakeswap-v3   1.0bp        9.1b  $1,230.33   $0.1712   $0.1670   0.01%
+0x420000->0x833589     aerodrome-slip   5.2bp     pancakeswap-v3   1.0bp        9.1b  $1,157.84   $0.1620   $0.1579   0.01%
+
+block 53,226,044  |  89 pools  |  58 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00414/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x420000->0xcbb7c0     aerodrome-slip   0.8bp     aero-slipstrea   0.8bp        3.0b    $890.99   $0.0588   $0.0546   0.00%
+
+block 53,226,057  |  88 pools  |  56 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00414/attempt
+pair                   buy                        sell                          edge       size     gross       net  impact
+0x833589->0x420000     aero-slipstrea   2.9bp     pancakeswap-v3   1.0bp        7.8b  $2,216.71   $0.4371   $0.4330   0.00%
+0x833589->0x420000     aerodrome-slip   5.2bp     pancakeswap-v3   1.0bp        6.9b    $279.82  $0.00926  $0.00512   0.00%
+
+block 53,226,071  |  88 pools  |  57 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00414/attempt
+no opportunity above $0.00000 net
+
+block 53,226,086  |  84 pools  |  54 token pairs  |  gas 0.0060 gwei + L1 0.00001 USD = $0.00414/attempt
+no opportunity above $0.00000 net  (best near-miss: 2.8bp edge, $0.00176 gross)
+
+==============================================================================
+scans 44   windows with a live opportunity 36
+opportunities 181   gross $100.93   net $100.17   gas/attempt $0.00414
+median size $1,662.09   median edge 7.3bp   max edge 134.7bp
+  0x420000->0x833589       $43.48
+  0x420000->0xcbb7c0       $33.17
+  0xcbb7c0->0x420000       $11.77
+  0x833589->0x420000       $9.35
+  0x833589->0x5be75e       $1.47
+  0x5be75e->0x833589       $0.4290
+  0x833589->0x07b3d9       $0.2783
+  0x311935->0xcbb7c0       $0.1959
+==============================================================================
+rpc calls 13,303  failed 4,844
