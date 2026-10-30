@@ -1,10 +1,11 @@
 # Running ARES
 
-> **Updated 2026-10-24.** The service, unit and state path described here are
-> unchanged, but the engine now runs the gear-shift desk in the
-> [README](../README.md). `.env.example` is the canonical list of settings.
-> `systemctl restart ares-bot` still needs root; without it, reload with
-> `kill -HUP $(systemctl show ares-bot -p MainPID --value)`.
+> **Updated 2026-10-30.** ARES runs on the Pi as `ares-bot.service`, trading the
+> gear-shift desk in the [README](../README.md). `.env.example` is the canonical
+> list of settings. Two traps cost a live deploy that day and are documented
+> below: `.env` is systemd's `EnvironmentFile`, so a HUP does **not** reload it,
+> and `ARES_STATE_PATH` must be absolute because `ProtectHome=read-only` blocks
+> the code directory.
 
 ARES is one Python process plus gunicorn, serving a localhost dashboard, on a
 **Raspberry Pi 3 Model A+**. It is paper-trading only.
@@ -26,8 +27,8 @@ chmod 600 .env
 | `ARES_UI_USER` / `ARES_UI_PASSWORD` | dashboard login; unset means the dashboard returns 503 |
 | `ARES_BIND` | bind address, default `127.0.0.1` |
 | `ARES_TLS_CERT` / `ARES_TLS_KEY` | set both to bind beyond localhost over HTTPS |
-| `ARES_STATE_PATH` | SQLite file, default `ares_state.sqlite3` |
-| `UNIVERSE` | comma-separated coins, default 12 liquid USD pairs |
+| `ARES_STATE_PATH` | SQLite book; must be **absolute** under systemd (`/var/lib/ares/ares_state.sqlite3`) |
+| `UNIVERSE` | comma-separated coins, default the eight majors |
 | `TREND_ADX`, `TREND_ER`, `RANGE_ADX`, `RANGE_ER`, `RANGE_MIN_WIDTH` | gear thresholds |
 | `RISK_PCT`, `MAX_POSITIONS`, `MAX_POSITION_PCT`, `MAX_EXPOSURE_PCT`, `MAX_SPREAD`, `MAX_DAILY_LOSS_PCT` | risk, sizing and cost gates |
 | `TREND_STOP_ATR`, `TREND_TARGET_ATR`, `TRAIL_ATR`, `RANGE_STOP_ATR`, `RANGE_TARGET` | exits |
@@ -38,8 +39,12 @@ If an old `.env` still says `MAX_POSITION_PCT=0.015`, every position is capped
 at 1.5% of equity and the desk will look almost idle; the gear-shift values are
 `4` and `0.25`.
 
-`config.py` reads `.env` itself at startup, and systemd also supplies its
-`EnvironmentFile=`. For a manual run you can still export values explicitly:
+`config.py` reads `.env` itself at startup (`os.environ.setdefault`), and the
+unit also lists the same file as `EnvironmentFile=`. The systemd-supplied values
+win, and they are frozen when the service starts: editing `.env` and sending
+`kill -HUP` reloads code but **not** credentials, broker keys or the universe.
+Only a real restart re-reads the file. For a manual run you can still export
+values explicitly:
 
 ```bash
 set -a; source .env; set +a
@@ -66,18 +71,22 @@ The unit in this repo expects `/home/jzewdu/ares_trading_bot` and
 ## Run it under systemd
 
 ```bash
-sudo cp ares-bot.service /etc/systemd/system/ares.service
+sudo cp ares-bot.service /etc/systemd/system/ares-bot.service
 sudo mkdir -p /var/lib/ares && sudo chown jzewdu:jzewdu /var/lib/ares
 sudo systemctl daemon-reload
-sudo systemctl enable --now ares
-journalctl -u ares -f
+sudo systemctl enable --now ares-bot
+journalctl -u ares-bot -f
 ```
 
 The unit exists for one reason: `Restart=on-failure` with `RestartSec=10`
 brings the service back after a crash. It also sandboxes the process
 (`ProtectSystem=full`, `ProtectHome=read-only`, `NoNewPrivileges`), with
 `/var/lib/ares` the only writable path — which is why the state database lives
-there and not next to the code.
+there and not next to the code. A relative `ARES_STATE_PATH` such as
+`ares_state.sqlite3` resolves to `/home/jzewdu/ares_trading_bot/...`, which
+`ProtectHome=read-only` makes unwritable: the worker dies at boot with
+`sqlite3.OperationalError: attempt to write a readonly database`. Keep it
+absolute.
 
 `paused` lives in SQLite. A fresh database starts unpaused; an existing one
 keeps whatever the dashboard last set. Pausing blocks entries only — open
@@ -139,14 +148,22 @@ trades anything:
 
 ## Updating the code
 
-The repository is the canonical copy of the source. Edit and push from the
-machine you develop on, then on the Pi:
+The repository is the canonical copy of the source. The Pi is **not** a git
+checkout — the service directory also holds `.venv`, `.env` and backups — so a
+release is a file copy, not a `git pull`:
 
 ```bash
-cd ~/ares_trading_bot
-git pull
-sudo systemctl restart ares
+# on the dev machine
+git archive --format=tar.gz -o /tmp/ares.tgz HEAD
+# copy to the Pi, unpack over ~/ares_trading_bot, keep .env
+sudo systemctl restart ares-bot      # needs root; re-reads EnvironmentFile
 ```
+
+The restart is not optional. `kill -HUP $(systemctl show ares-bot -p MainPID --value)`
+reloads workers and code, but the environment was captured at start, so new
+credentials or a new `UNIVERSE` in `.env` need the restart. After deploying,
+check the files against the commit with `tr -d '\r' < file | sha1sum`: a Windows
+checkout can add CRLF, which Python tolerates but which changes the hash.
 
 If you edited the running copy on the Pi instead, `scripts/publish-from-pi.sh`
 copies those edits back into the repo, commits and pushes them, refusing to
