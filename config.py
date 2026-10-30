@@ -26,8 +26,11 @@ def _load_env_file() -> None:
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
+        # A value already in the real environment wins. Without this, a .env
+        # file silently overrode ARES_STATE_PATH in the tests and the suite
+        # wrote synthetic trades into the live book's database.
         if key:
-            os.environ[key] = value
+            os.environ.setdefault(key, value)
 
 
 _load_env_file()
@@ -62,12 +65,21 @@ class Settings:
     ui_user: str = os.getenv("ARES_UI_USER", "")
     ui_password: str = os.getenv("ARES_UI_PASSWORD", "")
 
-    # One instrument. A spot account cannot short, and spreading the same
-    # rules over twelve coins only widened the fee bill; BTC carries the trend.
-    universe: tuple[str, ...] = _symbols("UNIVERSE", ("BTC",))
-    bars_days: int = _int("BARS_DAYS", 120)
+    # A book, not one coin. The slow rule trades each name rarely, so one
+    # instrument leaves the desk idle for months; eight majors give the same
+    # edge a chance to fire somewhere without raising turnover much. Measured
+    # on daily Alpaca bars since 2021: equal-weight basket +87.4% against -7.8%
+    # for holding the same eight, positive in both halves of the sample.
+    universe: tuple[str, ...] = _symbols(
+        "UNIVERSE", ("BTC", "ETH", "SOL", "LINK", "AVAX", "DOGE", "LTC", "BCH"))
+    # The trend line is read on daily bars. On 4-hour bars a 200-bar line is a
+    # 33-day EMA, which crosses a handful of times a quarter on an instrument
+    # that charges 25bp a side; that version lost money live. Daily bars make
+    # the same 200 bars a 200-day line: 77 trades became 2 on BTC.
+    bar_timeframe: str = os.getenv("BAR_TIMEFRAME", "1Day").strip()
+    bars_days: int = _int("BARS_DAYS", 800)
 
-    # Regime thresholds, measured on closed 4h bars.
+    # Regime thresholds, measured on closed candles of BAR_TIMEFRAME.
     trend_adx: float = _float("TREND_ADX", 25.0)
     trend_er: float = _float("TREND_ER", 0.30)
     trend_spread_pct: float = _float("TREND_SPREAD_PCT", 0.35)
@@ -79,14 +91,14 @@ class Settings:
     # A 2% risk budget against an 8-ATR stop puts about half of equity into BTC,
     # which is the point of a core position: exposure, not scalping.
     risk_pct: float = _float("RISK_PCT", 0.02)
-    max_positions: int = _int("MAX_POSITIONS", 1)
+    max_positions: int = _int("MAX_POSITIONS", 4)
     max_position_pct: float = _float("MAX_POSITION_PCT", 0.5)
     max_exposure_pct: float = _float("MAX_EXPOSURE_PCT", 0.5)
     min_notional: float = _float("MIN_NOTIONAL", 25.0)
     max_spread: float = _float("MAX_SPREAD", 0.0015)
     cooldown_minutes: int = _int("ENTRY_COOLDOWN_MIN", 60)
     max_daily_loss_pct: float = _float("MAX_DAILY_LOSS_PCT", 0.03)
-    # How far price may drift from the 4h close before an entry is stale.
+    # How far price may drift from the last close before an entry is stale.
     max_signal_drift_atr: float = _float("MAX_SIGNAL_DRIFT_ATR", 2.0)
     # Alpaca's crypto print feed for BTC can trail the clock by minutes on a
     # slow link. A core position held for weeks does not care about a few
@@ -95,7 +107,7 @@ class Settings:
 
     # The BTC trend core.
     btc_ema_bars: int = _int("BTC_EMA_BARS", 200)
-    btc_brake_atr: float = _float("BTC_BRAKE_ATR", 2.0)
+    btc_brake_atr: float = _float("BTC_BRAKE_ATR", 3.0)
     # After a brake exit the desk waits for price to climb this far back above
     # the brake before paying the fee to re-enter. Without it a market that
     # chops across the line buys the same loss twice: the first live brake exit
@@ -105,14 +117,17 @@ class Settings:
     # every value from 1.0 to 2.0 still lost money at a 200-bar line and a 2-ATR
     # brake, and 3.0 was the smallest setting that turned the same rule positive
     # in both halves of the sample. Fewer trades is the point.
-    btc_rearm_atr: float = _float("BTC_REARM_ATR", 3.0)
+    btc_rearm_atr: float = _float("BTC_REARM_ATR", 1.5)
 
     # Exits. No trailing stop: on this instrument and this fee schedule it
     # turned one trend into a dozen round trips. The brake is the exit.
     trail_atr: float = _float("TRAIL_ATR", 0.0)
     trend_stop_atr: float = _float("TREND_STOP_ATR", 8.0)
     trend_target_atr: float = _float("TREND_TARGET_ATR", 400.0)
-    trend_max_days: float = _float("TREND_MAX_DAYS", 365.0)
+    # The brake is the exit. A time stop shorter than a bitcoin cycle would
+    # cut the one hold that paid for everything: the 2023-2025 trend ran 1032
+    # days, so a 365-day stop would have booked a third of the move.
+    trend_max_days: float = _float("TREND_MAX_DAYS", 3650.0)
     range_stop_atr: float = _float("RANGE_STOP_ATR", 2.0)
     range_max_days: float = _float("RANGE_MAX_DAYS", 6.0)
     range_rsi: float = _float("RANGE_RSI", 35.0)
@@ -124,6 +139,9 @@ class Settings:
     poll_seconds: int = _int("POLL_SECONDS", 300)
     state_path: str = os.getenv("ARES_STATE_PATH", "ares_state.sqlite3")
     bind_host: str = os.getenv("ARES_BIND", "127.0.0.1")
+    # 8080 is often taken by the SSH tunnel that reaches the Pi's copy of this
+    # dashboard; the local desk takes 8090 so both can be open at once.
+    bind_port: int = _int("ARES_PORT", 8090)
     tls_cert: str = os.getenv("ARES_TLS_CERT", "")
     tls_key: str = os.getenv("ARES_TLS_KEY", "")
 

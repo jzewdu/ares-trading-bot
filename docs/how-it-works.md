@@ -9,58 +9,50 @@ This page is the implementation detail.
 `max(60, POLL_SECONDS)` seconds (300 s by default).
 
 1. **Quotes.** `latest_market()` returns a trade or quote per pair with its age
-   and quoted spread. A quote older than five minutes is still used to mark the
-   book, but it cannot open a trade.
-2. **Bars.** `bars()` pages hourly Alpaca bars back `BARS_DAYS` (90) and the
-   regime module folds them into 4-hour buckets. The final, partial bucket is
-   dropped, so every signal uses a completed bar.
-3. **Regime.** For each coin, `classify()` computes EMA20/EMA60, ATR, ADX, RSI,
-   Bollinger bands, the prior 20-bar high/low and Kaufman efficiency, then
-   assigns a gear. `stable` counts consecutive bars in the same gear and
-   direction; signals require at least two.
+   and quoted spread. A stale print still marks the book but cannot open a
+   trade.
+2. **Bars.** `bars(timeframe=BAR_TIMEFRAME)` pages the requested candles back
+   `BARS_DAYS` and, for intraday feeds, folds them into 4-hour buckets. For the
+   shipping daily feed nothing is aggregated: a daily candle is already the
+   resolution the 200-bar line is meant to read.
+3. **Rule.** `btc_trend.analyse()` walks the candles once, computing a 200-bar
+   EMA, ATR(14), ADX, RSI, Bollinger bands and Donchian levels, and marks each
+   candle `trend` (close above the brake), `trend/flat` (below the line but
+   inside the band) or `stand_aside/down` (past the brake). Warm-up is
+   `EMA + 10` candles and is skipped, never back-filled.
 4. **Mark.** Equity and cash come from Alpaca. Exposure and open P&L are marked
    from the latest quotes. The daily-loss baseline is stored per UTC date.
-5. **Exits.** Stops and targets are checked against the live price; a trend stop
-   trails 4.5 ATR under the high since entry. A regime flip, a time stop or a
-   hit level sells the broker's exact quantity.
-6. **Entries.** Candidates are ranked by signal score. Each must clear the
-   spread gate, the freshness check (price within 0.75 ATR of the signal close),
-   the cooldown, the learner's avoid gate and the portfolio caps.
+5. **Exits.** The catastrophe stop (8 ATR below the fill) and the brake are
+   checked every cycle; the brake is a *close* condition, so it is evaluated from
+   the rule's own state rather than from the live tick.
+6. **Entries.** Candidates are ranked by signal score and capped at
+   `MAX_POSITIONS`. Each must clear the spread gate, the freshness check, the
+   cooldown, the re-arm gate, the learner's avoid gate, the foreign-position
+   guard and the portfolio caps.
 7. **Reconcile and record.** The ledger is compared with `GET /v2/positions`,
    equity is marked and one row is written to `gear_marks`.
 
-## The classifier
+## The rule
 
-All indicators are Wilder/standard implementations in `regime.py`, computed from
-completed bars only.
+One instrument-level state machine, no regimes and no gears:
 
-| Input | Meaning here |
+| Condition | Action |
 | --- | --- |
-| ADX(14) | strength of directional movement, regardless of sign |
-| Efficiency(20) | net move ÷ path walked; 1.0 is a straight line, 0 is chop |
-| EMA20 − EMA60 | trend separation as a percent of price |
-| Bollinger(20, 2) | band width for range quality, lower band for entries |
-| Donchian(20) | prior 20-bar high, excluding the current bar |
-| ATR(14) | stop distance and position sizing |
-| RSI(14) | oversold confirmation in the range gear |
+| close > EMA(200) − 3 ATR | hold or enter the core long |
+| close < EMA(200) − 3 ATR | sell, write a re-arm anchor, wait |
+| any exit, price < brake + 1.5 ATR | refuse a new entry |
+| price ≤ entry − 8 ATR | catastrophe stop, intracycle |
 
-A downtrend is a valid trend, but the account is spot-only, so `direction=down`
-maps to **stand aside** rather than a short.
+A position is entered with a limit-free market order sized so that the distance
+from fill to catastrophe stop is exactly 2% of equity:
 
-## Signals
+```
+qty = equity * RISK_PCT / (TREND_STOP_ATR * ATR)
+```
 
-**Trend/breakout.** Requires gear `trend`, direction up, the close above the
-prior 20-bar high, and the breakout no more than 0.75 ATR beyond it. Stop 3 ATR,
-target 9 ATR, trailing stop 4.5 ATR from the high since entry, 20-day time stop.
-Score weighs efficiency, ADX and how fresh the break is.
-
-**Range/band fade.** Requires gear `range`, RSI ≤ 35, the close within 0.25 ATR
-of (or below) the lower band, and a target at least 1.2 ATR away. Stop 2 ATR,
-target the middle band (or the upper band with `RANGE_TARGET=upper`), 6-day time
-stop.
-
-Both signals are rejected outright if the stop distance is non-positive or the
-reward/risk is below the gear's floor.
+Because an 8-ATR stop on a daily candle is wide (roughly 15-30%), that formula
+deploys 8-13% of equity per name. Four names plus the 50% exposure cap bound the
+book at about half of equity.
 
 ## Order lifecycle
 
@@ -74,10 +66,26 @@ Alpaca takes its crypto fee in coin, so the position is 0.25% smaller than the
 order. The stop and target are anchored to the actual `avg_entry_price`, which
 preserves the risk geometry through slippage.
 
-Exits sell the broker's own quantity **string** (`"1633.614775495"`). Formatting
-that to 8 decimals rounds up past the balance — Alpaca answers with a 403
-`insufficient balance`, which is exactly how the retired carry book's LINK leg
-got stranded once.
+Exits sell `min(ledger quantity, broker quantity)`, formatted by
+`qty_string()` which truncates to 8 decimals. Rounding up past the balance is
+what once made Alpaca answer 403 `insufficient balance` and stranded a LINK leg.
+Selling the ledger's own quantity rather than the broker's whole position means
+a second process on the same account cannot have its trades liquidated by this
+one.
+
+## Re-arm anchors
+
+A brake exit is not a dip to buy back immediately. On every exit the engine
+writes `rearm_<COIN> = "<iso timestamp>|<reason>"` to `kv`, and clears it on the
+next successful entry. `_enter()` reads the anchor when `recent_close()` has no
+row, so a restart on a fresh database still knows the account owes the market a
+re-arm.
+
+This exists because it failed in production. The gate tested
+`exit_reason.startswith("trend brake")`, so an exit recorded for any other reason
+— a handover, a manual flatten — carried no anchor and the book bought straight
+back. The account sold at 81,124 and re-bought at 81,290 ten minutes later, then
+again at 80,150 after a 79,840 brake exit: about $1.1k in two round trips.
 
 ## The learner
 
@@ -102,16 +110,25 @@ Every close writes a human-readable lesson onto the trade row (`... | 8 trades,
 | `gear_trades` | one row per trade, entry/exit cash, fees, R, lesson, broker ids |
 | `gear_marks` | equity, exposure, open count and active gear each cycle |
 | `learn` | decayed `n`, `wins`, `sum_r` per bucket |
-| `decisions` | why a candidate was bought, skipped or trailed |
+| `decisions` | why a candidate was bought, skipped or refused |
 | `events` | rolling 120-line system log |
-| `kv` | `paused`, launch baseline, daily-loss baseline |
+| `kv` | `paused`, launch baseline, daily-loss baseline, **re-arm anchors** |
 
 The retired carry tables (`dn_*`) may still exist in the database; nothing reads
 them.
+
+## Configuration precedence
+
+`.env` is loaded at import with `os.environ.setdefault`, so a value already in
+the real environment wins. That ordering is deliberate: the test suite sets
+`ARES_STATE_PATH` to a temp file, and with the file overriding it the suite
+wrote synthetic trades into the live book.
 
 ## Failure behaviour
 
 A failed cycle logs an error and keeps the book. After six consecutive failed
 cycles, entries pause; exits resume as soon as data returns. A daily loss beyond
-3% pauses entries for the UTC day. Nothing in this path places a second order for
-a signal that already filled: one position per coin, plus a cooldown after close.
+3% pauses entries for the UTC day. `scripts/run_ares.cmd` restarts a dead process
+after 15 seconds and refuses to start a second copy while the dashboard port is
+listening. Nothing in this path places a second order for a signal that already
+filled: one position per coin, plus a cooldown after close.

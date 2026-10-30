@@ -1,10 +1,19 @@
-"""BTC trend-core loop: own bitcoin while its trend holds, stand aside when it breaks.
+"""Trend-core loop: own each major while its trend holds, stand aside when it breaks.
 
-Each cycle the engine rebuilds 4-hour bars and asks one question: is BTC above
-its 200-bar trend line? If it is, the desk holds a core long sized to a fixed
-risk budget. A close more than `BTC_BRAKE_ATR` ATRs below the line is the only
-exit, plus an 8-ATR catastrophe stop. No scaling, no scalping, no twelve-coin
-scan: on Alpaca's 0.25%-per-side crypto fee, turnover is the enemy.
+Each cycle the engine reads `BAR_TIMEFRAME` candles (daily by default) and asks
+one question per coin: is the close above its 200-bar trend line? If it is, the
+desk holds a core long sized to a fixed risk budget, up to `MAX_POSITIONS`
+names. A close more than `BTC_BRAKE_ATR` ATRs below the line is the only exit,
+plus an 8-ATR catastrophe stop. No scaling and no scalping: on Alpaca's
+0.25%-per-side crypto fee, turnover is the enemy.
+
+Two invariants are load-bearing and easy to break:
+
+  * a position is only ever sold for the quantity this ledger owns, never the
+    broker's whole position, so a second process or a manual trade sharing the
+    account cannot be liquidated by accident;
+  * an exit writes a re-arm anchor to the state store, and a restart honours
+    it, so a fresh database cannot re-buy the dip the account just sold.
 
 Every exit files the result into `learning.py`, which decays old evidence and
 uses it to shrink, block or lean into the same kind of trade next time.
@@ -69,6 +78,22 @@ def _score(item) -> float:
     return float(sig.get("score", 0)) if sig else 0.0
 
 
+def _rearm_anchor(coin: str) -> dict | None:
+    """The last exit for a coin, remembered outside the trade table.
+
+    `recent_close` only knows about trades the current database saw. A restart
+    on a fresh state file, or a position closed by hand during a handover,
+    leaves no row there and the desk re-bought the dip it had just sold. This
+    key is written on every exit and cleared on every entry, so a process that
+    has just started still knows it owes the market a re-arm.
+    """
+    raw = get_value(f"rearm_{coin}", "")
+    if not raw:
+        return None
+    ts, _, reason = raw.partition("|")
+    return {"ts": ts, "reason": reason} if ts else None
+
+
 class Engine:
     def __init__(self) -> None:
         self._thread: threading.Thread | None = None
@@ -117,8 +142,8 @@ class Engine:
             try:
                 client = AlpacaClient()
                 self._init_account(client)
-                # The first scan pulls 90 days of bars; reflect that in status.
-                self._set_status("Scanning BTC for a trend")
+                self._set_status(f"Scanning {len(SETTINGS.universe)} majors for "
+                                 f"a {SETTINGS.bar_timeframe} trend")
                 self._cycle(client)
                 self._data_errors = 0
                 backoff = max(60, SETTINGS.poll_seconds)
@@ -183,23 +208,30 @@ class Engine:
 
     def _analyse(self, bars: dict[str, list[dict]]) -> None:
         ctx: dict[str, dict] = {}
+        # The rule is fed whatever Alpaca returned. Hourly bars are folded into
+        # 4-hour candles; daily bars are already the resolution the 200-bar
+        # line is meant to read, so aggregating them again would invent
+        # multi-day candles that no bar close ever produced.
+        daily = SETTINGS.bar_timeframe.lower().endswith("day")
         for coin in SETTINGS.universe:
             symbol = SETTINGS.spot_symbol(coin)
-            hourly = []
+            series = []
             for bar in bars.get(symbol, []):
                 try:
-                    hourly.append({
+                    series.append({
                         "ts": _epoch(bar["t"]), "o": float(bar["o"]), "h": float(bar["h"]),
                         "l": float(bar["l"]), "c": float(bar["c"]),
                     })
                 except (KeyError, TypeError, ValueError):
                     continue
-            rows = aggregate(hourly, 4)
+            rows = series if daily else aggregate(series, 4)
             regimes = analyse_trend(rows, SETTINGS)
             if not regimes:
                 ctx[coin] = {
                     "coin": coin, "symbol": symbol, "gear": STAND_ASIDE, "direction": "flat",
-                    "stable": 0, "reason": "Waiting for enough 4h history", "signal": None,
+                    "stable": 0,
+                    "reason": f"Waiting for enough {SETTINGS.bar_timeframe} history",
+                    "signal": None,
                     "adx": 0.0, "er": 0.0, "atr": 0.0, "atr_pct": 0.0, "rsi": 0.0,
                     "close": 0.0, "bb_low": 0.0, "bb_mid": 0.0, "bb_up": 0.0,
                     "bb_width_pct": 0.0, "don_high": 0.0, "don_low": 0.0,
@@ -339,13 +371,16 @@ class Engine:
         # decimals rounds *up* past the balance, and Alpaca rejects the order
         # with a 403; the raw string is always covered by the position.
         held_pos = held.get(symbol) or {}
-        qty = float(held_pos.get("qty") or 0) or float(pos["qty"])
+        broker_qty = float(held_pos.get("qty") or 0)
+        # Sell the book's own quantity, never the broker's whole position. If a
+        # second process (or a manual trade) added to the same symbol, the
+        # broker holds more than this ledger is responsible for; selling all of
+        # it would quietly liquidate someone else's trade.
+        qty = min(float(pos["qty"]), broker_qty) if broker_qty > 0 else float(pos["qty"])
         if qty <= 0:
             event("error", f"{pos['coin']}: no position to sell; trade left open")
             return False
-        sell_qty = str(held_pos.get("qty") or "").strip()
-        if not sell_qty or "e" in sell_qty.lower():
-            sell_qty = AlpacaClient.qty_string(qty)
+        sell_qty = AlpacaClient.qty_string(qty)
         try:
             before = float(client.account().get("cash", 0) or 0)
             submitted = client.market_sell(symbol, sell_qty,
@@ -375,6 +410,8 @@ class Engine:
         lesson = " · ".join(lessons[-2:]) if lessons else ""
         close_trade(pos["id"], fill, proceeds, fee, pnl, r_multiple, hold, reason, lesson,
                     order.get("id"))
+        set_value(f"rearm_{pos['coin']}",
+                  f"{datetime.now(timezone.utc).isoformat(timespec='seconds')}|{reason}")
         event("trade", f"CLOSE {pos['coin']} [{pos['gear']}] {r_multiple:+.2f}R "
                        f"(${pnl:+,.2f}) — {reason}. {lesson}")
         record_decision(symbol, "SELL", decision_note, fill)
@@ -390,12 +427,39 @@ class Engine:
             return
         held = {pos["coin"] for pos in open_trades()}
         exposure = self.exposure
+        # Coins the broker holds but this book does not: another runner, a
+        # manual fill, or a leftover. Buying more would double the exposure and
+        # make the two ledgers disagree about who owns what, so they are left
+        # completely alone.
+        foreign: set[str] = set()
+        try:
+            for held_pos in client.positions():
+                qty = float(held_pos.get("qty") or 0)
+                if qty <= 0:
+                    continue
+                value = abs(float(held_pos.get("market_value") or 0))
+                if value == 0:
+                    coin = _pair(held_pos["symbol"]).split("/")[0]
+                    priced = float(self.prices.get(coin, {}).get("price", 0) or 0)
+                    value = qty * priced
+                # A sell leaves rounding dust behind; a few hundred millionths
+                # of a coin is not somebody else's position.
+                if value > 1.0:
+                    foreign.add(_pair(held_pos["symbol"]))
+        except (requests.RequestException, ValueError, KeyError):
+            pass
         if len(held) >= SETTINGS.max_positions:
             return
         for coin, row in sorted(self.ctx.items(), key=_score, reverse=True):
             if len(held) >= SETTINGS.max_positions:
                 break
             if coin in held:
+                continue
+            if row["symbol"] in foreign and coin not in held:
+                record_decision(row["symbol"], "SKIP",
+                                "Alpaca already holds this pair outside the book "
+                                "(another runner or a manual fill); not adding to it",
+                                float(self.prices.get(coin, {}).get("price", 0) or 0))
                 continue
             signal = row.get("signal")
             quote = self.prices.get(coin, {})
@@ -423,25 +487,32 @@ class Engine:
             if move > SETTINGS.max_signal_drift_atr:
                 record_decision(symbol, "SKIP",
                                 f"Signal is stale: price has travelled {move:.1f} ATR since the "
-                                f"4h close ({signal['entry_ref']:.6g})", price)
+                                f"last close ({signal['entry_ref']:.6g})", price)
                 continue
             last = recent_close(coin)
-            if last and _hours_since(last.get("closed_ts", "")) * 60 < SETTINGS.cooldown_minutes:
+            anchor = _rearm_anchor(coin)
+            exit_ts = str((last or {}).get("closed_ts") or (anchor or {}).get("ts") or "")
+            exit_reason = str((last or {}).get("exit_reason") or (anchor or {}).get("reason") or "")
+            if exit_ts and _hours_since(exit_ts) * 60 < SETTINGS.cooldown_minutes:
                 continue
-            # A brake exit is not a dip to buy back immediately. Requiring a
-            # margin above the brake keeps a market oscillating around the line
-            # from charging the desk 50bp of fees per oscillation.
-            if (last and str(last.get("exit_reason", "")).startswith("trend brake")
-                    and SETTINGS.btc_rearm_atr > 0):
+            # Any exit re-arms the desk, not just the brake. The gate used to
+            # test `exit_reason.startswith("trend brake")`, so an exit recorded
+            # for any other reason carried no anchor at all and the book bought
+            # back at once: the live account sold at 81,124 during a handover
+            # and re-bought at 81,290 ten minutes later, then again at 80,150
+            # after a 79,840 brake exit. Two round trips, both losses, ~$1.1k.
+            # The anchor also lives in the state store, so a fresh database
+            # cannot forget an exit the account already paid for.
+            if exit_ts and SETTINGS.btc_rearm_atr > 0:
                 brake = float(row.get("ema_slow") or 0.0)
                 atr_now = float(row.get("atr") or 0.0)
                 need = brake + SETTINGS.btc_rearm_atr * atr_now
                 if brake > 0 and atr_now > 0 and price < need:
                     record_decision(
                         symbol, "SKIP",
-                        f"Re-arm: the last exit was the brake, so price must reclaim "
-                        f"{need:,.0f} ({SETTINGS.btc_rearm_atr:.1f} ATR above the "
-                        f"{brake:,.0f} brake) before a new position is paid for", price)
+                        f"Re-arm: the desk exited at {exit_reason[:40]}, so price must "
+                        f"reclaim {need:,.0f} ({SETTINGS.btc_rearm_atr:.1f} ATR above the "
+                        f"{brake:,.0f} brake) before another position is paid for", price)
                     continue
             view = advice(signal["gear"], coin, float(row["adx"]), float(row["atr_pct"]))
             if view["mult"] <= 0:
@@ -515,6 +586,9 @@ class Engine:
         trade_id = open_trade(coin, symbol, signal["gear"], signal["setup"], entry, qty, cost,
                               stop, target, risk_usd, qty * entry, entry_fee,
                               signal["features"], float(signal["score"]), order.get("id"))
+        # The desk paid the re-arm; forget the anchor so the next exit starts
+        # a fresh one.
+        set_value(f"rearm_{coin}", "")
         event("trade", f"OPEN {coin} [{signal['gear']}/{signal['setup']}] {qty:.8g} @ "
                        f"{entry:.6g} (${qty * entry:,.2f}) — stop {stop:.6g}, target "
                        f"{target:.6g} ({signal['rr']:.2f}R), risk ${risk_usd:,.2f} "
@@ -529,7 +603,8 @@ class Engine:
         if not self.prices:
             raise RuntimeError("Alpaca returned no crypto quotes")
         symbols = [SETTINGS.spot_symbol(c) for c in SETTINGS.universe]
-        bars = client.bars(symbols, days=SETTINGS.bars_days)
+        bars = client.bars(symbols, days=SETTINGS.bars_days,
+                           timeframe=SETTINGS.bar_timeframe)
         self._analyse(bars)
         self._mark(client)
         self._manage(client)
@@ -539,8 +614,10 @@ class Engine:
         with self._lock:
             self.start_equity = float(get_value("gear_start_equity", "0") or 0)
             self.last_cycle = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            self.status = ("Long BTC — trend intact" if self.headline_gear == TREND else
-                           "In cash — BTC below its trend line")
+            self.status = (f"Long {self.gear_counts.get(TREND, 0)} of "
+                           f"{len(SETTINGS.universe)} — trend intact"
+                           if self.headline_gear == TREND else
+                           "In cash — nothing is above its trend line")
             self.last_error = None
 
     # ------------------------------------------------------------------ dashboard

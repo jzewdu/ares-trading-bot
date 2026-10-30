@@ -53,6 +53,12 @@ def bars_from_closes(closes, start=1_700_000_000):
     return out
 
 
+def raw_from_bars(bars):
+    """The same candles shaped the way Alpaca returns them."""
+    return [{"t": b["ts"], "o": str(b["o"]), "h": str(b["h"]),
+             "l": str(b["l"]), "c": str(b["c"]), "v": "1"} for b in bars]
+
+
 def hourly_from_bars(bars):
     """Split each 4h bar into four hourly bars that aggregate back to it."""
     hourly = []
@@ -126,9 +132,10 @@ assert decayed["scope"] != "coin + context", "decayed bucket must lose its autho
 
 # ---------------------------------------------------------------- engine test
 class FakeBroker:
-    def __init__(self, price, hourly):
+    def __init__(self, price, hourly, daily=None):
         self.price = price
         self.hourly = hourly
+        self.daily = daily if daily is not None else hourly
         self.cash = 100000.0
         self.qty = 0.0
         self.basis = 0.0
@@ -139,8 +146,10 @@ class FakeBroker:
         return {s: {"price": self.price, "age_s": 1.0, "spread": 0.0003,
                     "source": "trade"} for s in symbols}
 
-    def bars(self, symbols, days=90):
-        return {"BTC/USD": self.hourly}
+    def bars(self, symbols, days=90, timeframe="1Hour"):
+        # The desk reads daily candles now, so hand it the candles themselves
+        # instead of the four hourly slices that used to be aggregated.
+        return {"BTC/USD": self.daily if "Day" in timeframe else self.hourly}
 
     def account(self):
         return {"equity": f"{self.cash + self.qty * self.price}", "cash": f"{self.cash}"}
@@ -183,7 +192,8 @@ class FakeBroker:
         return f"{qty:.8f}".rstrip("0").rstrip(".")
 
 
-broker = FakeBroker(price=trend.close, hourly=hourly_from_bars(trend_bars))
+broker = FakeBroker(price=trend.close, hourly=hourly_from_bars(trend_bars),
+                    daily=raw_from_bars(trend_bars))
 eng = Engine()
 eng._init_account(broker)
 eng._cycle(broker)
@@ -277,22 +287,22 @@ state.set_value("paused", "0")
 
 near = Engine()
 near.equity, near.cash, near.exposure = 100000.0, 100000.0, 0.0
-near.ctx = {"BTC": gate_row(99.0)}
-near.prices = {"BTC": {"price": 99.0, "spread": 0.0003, "age": 1.0}}
-broker.price = 99.0
+near.ctx = {"BTC": gate_row(98.0)}
+near.prices = {"BTC": {"price": 98.0, "spread": 0.0003, "age": 1.0}}
+broker.price = 98.0
 near._enter(broker)
-print(f"0.5 ATR above the brake -> {len(state.open_trades())} position(s)")
+print(f"inside the re-arm band -> {len(state.open_trades())} position(s)")
 assert not state.open_trades(), "the desk must not buy back a brake exit at the brake"
 assert any("Re-arm" in str(d["reason"]) for d in state.recent_decisions(4)), \
     "the refusal must say it is waiting for the re-arm level"
 
 far = Engine()
 far.equity, far.cash, far.exposure = 100000.0, 100000.0, 0.0
-far.ctx = {"BTC": gate_row(103.0)}
-far.prices = {"BTC": {"price": 103.0, "spread": 0.0003, "age": 1.0}}
-broker.price = 103.0
+far.ctx = {"BTC": gate_row(101.0)}
+far.prices = {"BTC": {"price": 101.0, "spread": 0.0003, "age": 1.0}}
+broker.price = 101.0
 far._enter(broker)
-print(f"3.5 ATR above the brake -> {len(state.open_trades())} position(s)")
+print(f"past the re-arm level -> {len(state.open_trades())} position(s)")
 assert len(state.open_trades()) == 1, "a decisive reclaim must re-enable the entry"
 broker.price = trend.close
 

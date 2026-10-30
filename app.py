@@ -83,4 +83,4 @@ if __name__ == "__main__":
     # Network binding requires HTTPS certs; never expose this service publicly.
     tls = (SETTINGS.tls_cert, SETTINGS.tls_key) if SETTINGS.tls_cert and SETTINGS.tls_key else None
     host = SETTINGS.bind_host if tls else "127.0.0.1"
-    app.run(host=host, port=8080, threaded=True, ssl_context=tls)
+    app.run(host=host, port=SETTINGS.bind_port, threaded=True, ssl_context=tls)

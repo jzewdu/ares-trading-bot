@@ -3,22 +3,27 @@
 Why this shape
 --------------
 A spot crypto account cannot short, and Alpaca charges 0.25% per side. On real
-BTC bars a 12-month test of breakout, pullback and mean-reversion rules turned
-over dozens of times and lost more to fees and whipsaw than the entries earned.
-The one rule that survived the same costs was the slow one: own BTC while it is
-above its 200-bar (4-hour) trend line, and step aside when price closes well
-below it. This module is that rule and nothing else.
+bars a test of breakout, pullback and mean-reversion rules turned over dozens of
+ times and lost more to fees and whipsaw than the entries earned. The one rule
+that survived the same costs was the slow one: own the coin while it is above a
+long trend line, and step aside when price closes well below it.
 
-* **long** - the 4-hour close is not past the brake. The desk owns BTC. Being
+The speed matters more than the shape. The same rule on 4-hour bars reads a
+200-bar line as a 33-day EMA, crossed a handful of times a quarter, and lost
+money live. On daily bars the identical code reads a 200-day line, which on BTC
+crossed twice in six years instead of 77 times. `settings.bar_timeframe`
+decides the unit; nothing else in this module cares.
+
+* **long** - the close is not past the brake. The desk owns the coin. Being
   a little below the trend line is allowed: entering only on a reclaim cost
   more in missed upside and round trips than it saved in the test window.
-* **brake** - the 4-hour close is more than `btc_brake_atr` ATRs below that
-  line. The desk sells and waits for the close to come back above the brake.
+* **brake** - the close is more than `btc_brake_atr` ATRs below that line. The
+  desk sells and waits for the close to come back above the brake.
 * the brake is the only exit besides the catastrophe stop, so the desk trades
-  a handful of times a year instead of a handful of times a day.
+  a handful of times a year per coin instead of a handful of times a day.
 
-Every decision uses completed 4-hour bars only, so a signal can never be built
-from a candle that is still forming.
+Every decision uses completed candles only, so a signal can never be built from
+a bar that is still forming.
 """
 from __future__ import annotations
 
@@ -78,7 +83,7 @@ def _donchian(highs: list[float], lows: list[float], period: int = 20):
 
 
 def analyse(bars: list[dict], settings) -> list[Row]:
-    """One row per completed 4-hour bar, using only bars up to that bar."""
+    """One row per completed candle, using only bars up to that candle."""
     if not bars:
         return []
     highs = [float(b["h"]) for b in bars]
@@ -93,6 +98,9 @@ def analyse(bars: list[dict], settings) -> list[Row]:
     don = _donchian(highs, lows, 20)
 
     warmup = int(settings.btc_ema_bars) + 10
+    # The line is described in whatever unit the feed speaks, so a daily book
+    # says "200-day" instead of the meaningless "200-bar".
+    unit = "day" if str(getattr(settings, "bar_timeframe", "")).lower().endswith("day") else "bar"
     out: list[Row] = []
     previous = ""
     stable = 0
@@ -110,16 +118,16 @@ def analyse(bars: list[dict], settings) -> list[Row]:
 
         if close < brake_level:
             gear, direction = STAND_ASIDE, "down"
-            reason = (f"Brake: BTC closed {abs(above):.2f}% below the trend line, past the "
+            reason = (f"Brake: price closed {abs(above):.2f}% below the trend line, past the "
                       f"{settings.btc_brake_atr:.1f}-ATR band ({brake_level:,.0f}); in cash")
         elif close > line:
             gear, direction = TREND, "up"
-            reason = (f"BTC {above:+.2f}% above its {int(settings.btc_ema_bars)}-bar trend line "
-                      f"({line:,.0f}); holding the core long")
+            reason = (f"Price {above:+.2f}% above its {int(settings.btc_ema_bars)}-{unit} trend "
+                      f"line ({line:,.0f}); holding the core long")
         else:
             gear, direction = TREND, "flat"
-            reason = (f"BTC is {abs(above):.2f}% below its {int(settings.btc_ema_bars)}-bar line "
-                      f"but inside the brake band ({brake_level:,.0f}); still holding the core")
+            reason = (f"Price is {abs(above):.2f}% below its {int(settings.btc_ema_bars)}-{unit} "
+                      f"line but inside the brake band ({brake_level:,.0f}); still holding the core")
         exit_level = brake_level
         # Keep the brake visible to callers without adding a field.
         key = f"{gear}:{direction}"
@@ -157,7 +165,7 @@ def signal_for(row, settings) -> dict | None:
             "adx": round(row.adx, 2), "er": round(row.er, 3),
             "atr_pct": round(row.atr_pct, 3), "rsi": round(row.rsi, 1),
         },
-        "why": (f"BTC is {row.trend_spread_pct:+.2f}% versus its "
+        "why": (f"Price is {row.trend_spread_pct:+.2f}% versus its "
                 f"{int(settings.btc_ema_bars)}-bar trend line ({row.ema_fast:,.0f}); "
                 f"stop {settings.trend_stop_atr:.1f} ATR below, brake at "
                 f"{row.ema_slow:,.0f}"),

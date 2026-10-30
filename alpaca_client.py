@@ -113,12 +113,13 @@ class AlpacaClient:
             out[symbol] = row
         return out
 
-    def bars(self, symbols: list[str], days: int = 90) -> dict[str, list[dict]]:
-        """Hourly bars back to `days`, following page tokens to the end.
+    def bars(self, symbols: list[str], days: int = 90,
+             timeframe: str = "1Hour") -> dict[str, list[dict]]:
+        """Bars back to `days`, following page tokens to the end.
 
-        The regime runs on 4h bars with a 60-period EMA, so it needs far more
-        than one 1000-bar page. Small symbol batches keep each response inside
-        the API's limits and stop one quiet pair from truncating the batch.
+        The desk runs a 200-bar trend line, so it needs far more than one
+        1000-bar page. Small symbol batches keep each response inside the API's
+        limits and stop one quiet pair from truncating the batch.
         """
         if not symbols:
             return {}
@@ -129,7 +130,7 @@ class AlpacaClient:
             token: str | None = None
             seen: set[str] = set()
             while True:
-                params = {"symbols": ",".join(batch), "timeframe": "1Hour",
+                params = {"symbols": ",".join(batch), "timeframe": timeframe,
                           "start": start, "limit": 1000, "sort": "asc"}
                 if token:
                     params["page_token"] = token

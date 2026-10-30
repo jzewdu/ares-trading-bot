@@ -5,3 +5,7 @@ __pycache__/
 logs/
 .venv/
 gear_summary.json
+# Cached Alpaca bars for the research harnesses; regenerate with the fetch
+# script in research/basket_bt.py's header rather than committing megabytes.
+research/data/
+st.json
